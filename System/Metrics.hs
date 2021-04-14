@@ -209,7 +209,13 @@ register name sample store = do
                                               stateMetrics
                              }
                      in (state', ())
-            True  -> alreadyInUseError name
+            True  ->
+              let
+                -- delete the metrics if it already exists
+                !state' = state { stateMetrics =  M.delete name stateMetrics }
+                -- re-register it again
+                !state'' = state' { stateMetrics = M.insert name (Left sample) stateMetrics }
+              in (state'', ())
 
 -- | Raise an exception indicating that the metric name is already in
 -- use.
