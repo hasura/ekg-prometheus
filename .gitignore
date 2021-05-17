@@ -11,3 +11,6 @@ cabal.config
 cabal.sandbox.config
 examples/Group
 *.sublime-*
+
+# This is ignored so that everyone can have their own hie options
+hie.yaml
