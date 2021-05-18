@@ -158,18 +158,6 @@ newStore = do
 ------------------------------------------------------------------------
 -- Internal state manipulation
 
-overSamplerMetrics ::
-  (Functor f) =>
-  (forall a. M.HashMap Identifier a -> f (M.HashMap Identifier a)) ->
-  GroupSampler ->
-  f GroupSampler
-overSamplerMetrics f GroupSampler{..} =
-  flip fmap (f groupSamplerMetrics) $ \groupSamplerMetrics' ->
-      GroupSampler
-          { groupSampleAction = groupSampleAction
-          , groupSamplerMetrics = groupSamplerMetrics'
-          }
-
 -- Delete an identifier and its associated metric. When no metric is
 -- registered at the identifier, the original state is returned.
 delete :: Identifier -> State -> State
@@ -190,6 +178,62 @@ delete identifier state@State{..} =
                 in  IM.update delete_ groupID stateGroups
             , stateNextId = stateNextId
             }
+
+overSamplerMetrics ::
+  (Functor f) =>
+  (forall a. M.HashMap Identifier a -> f (M.HashMap Identifier a)) ->
+  GroupSampler ->
+  f GroupSampler
+overSamplerMetrics f GroupSampler{..} =
+  flip fmap (f groupSamplerMetrics) $ \groupSamplerMetrics' ->
+      GroupSampler
+          { groupSampleAction = groupSampleAction
+          , groupSamplerMetrics = groupSamplerMetrics'
+          }
+
+insert :: Identifier -> MetricSampler -> State -> State
+insert identifier sample state = state
+    { stateMetrics =
+        M.insert identifier (Left sample) $ stateMetrics state
+    }
+
+register' :: Identifier -> MetricSampler -> State -> State
+register' identifier sample =
+  insert identifier sample . delete identifier
+
+insertGroup
+    :: M.HashMap Identifier
+       (a -> Value)  -- ^ Metric identifiers and getter functions
+    -> IO a          -- ^ Action to sample the metric group
+    -> State
+    -> State
+insertGroup getters cb State{..} = State
+    { stateMetrics =
+        M.foldlWithKey' (register_ stateNextId) stateMetrics getters
+    , stateGroups =
+        IM.insert stateNextId (GroupSampler cb getters) stateGroups
+    , stateNextId = stateNextId + 1
+    }
+  where
+    register_ groupId metrics name _ =
+        M.insert name (Right groupId) metrics
+
+registerGroup'
+    :: M.HashMap Identifier
+       (a -> Value)  -- ^ Metric identifiers and getter functions
+    -> IO a          -- ^ Action to sample the metric group
+    -> State
+    -> State
+registerGroup' getters cb =
+  insertGroup getters cb . delete_
+  where
+    delete_ state = foldl' (flip delete) state (M.keys getters)
+
+deregisterByName' :: T.Text -> State -> State
+deregisterByName' name state =
+    let identifiers = -- to remove
+          filter (\i -> name == idName i) $ M.keys $ stateMetrics state
+    in  foldl' (flip delete) state identifiers
 
 ------------------------------------------------------------------------
 -- * Metric identifiers
@@ -257,12 +301,8 @@ register :: Identifier
          -> IO ()
 register identifier sample store =
     atomicModifyIORef (storeState store) $ \state ->
-        let !state' = delete identifier state
-            !state'' = state'
-                { stateMetrics =
-                    M.insert identifier (Left sample) $ stateMetrics state'
-                }
-        in (state'', ())
+        let !state' = register' identifier sample state
+        in (state', ())
 
 -- | Register an action that will be executed any time one of the
 -- metrics computed from the value it returns needs to be sampled.
@@ -315,21 +355,8 @@ registerGroup
     -> IO ()
 registerGroup getters cb store = do
     atomicModifyIORef (storeState store) $ \state ->
-        let !state' = foldl' (flip delete) state $ M.keys getters
-            !state'' =
-                let groupId = stateNextId state'
-                in  State
-                    { stateMetrics = M.foldlWithKey' (register_ groupId)
-                                      (stateMetrics state') getters
-                    , stateGroups  = IM.insert groupId
-                                      (GroupSampler cb getters)
-                                      (stateGroups state')
-                    , stateNextId  = groupId + 1
-                    }
-       in  (state'', ())
-  where
-    register_ groupId metrics name _ =
-        M.insert name (Right groupId) metrics
+        let !state' = registerGroup' getters cb state
+        in  (state', ())
 
 ------------------------------------------------------------------------
 -- ** Convenience functions
@@ -642,12 +669,8 @@ gcParTotBytesCopied = Stats.parAvgBytesCopied
 deregisterByName :: T.Text -> Store -> IO ()
 deregisterByName name store =
     atomicModifyIORef (storeState store) $ \state ->
-        let identifiers = -- to remove
-              filter (\i -> name == idName i) $
-                M.keys $
-                  stateMetrics state
-            !state' = foldl' (flip delete) state identifiers
-        in (state', ())
+        let !state' = deregisterByName' name state
+        in  (state', ())
 
 ------------------------------------------------------------------------
 -- * Sampling metrics
