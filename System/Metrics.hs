@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE ExistentialQuantification #-}
@@ -81,7 +80,7 @@ import Control.Monad (forM)
 import Data.Hashable
 import Data.Int (Int64)
 import qualified Data.IntMap.Strict as IM
-import Data.IORef (IORef, atomicModifyIORef, newIORef, readIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import qualified Data.HashMap.Strict as M
 import Data.List (foldl')
 import qualified Data.Text as T
@@ -300,9 +299,8 @@ register :: Identifier
          -> Store
          -> IO ()
 register identifier sample store =
-    atomicModifyIORef (storeState store) $ \state ->
-        let !state' = register' identifier sample state
-        in (state', ())
+    atomicModifyIORef' (storeState store) $ \state ->
+        (register' identifier sample state, ())
 
 -- | Register an action that will be executed any time one of the
 -- metrics computed from the value it returns needs to be sampled.
@@ -354,9 +352,8 @@ registerGroup
     -> Store         -- ^ Metric store
     -> IO ()
 registerGroup getters cb store = do
-    atomicModifyIORef (storeState store) $ \state ->
-        let !state' = registerGroup' getters cb state
-        in  (state', ())
+    atomicModifyIORef' (storeState store) $ \state ->
+        (registerGroup' getters cb state, ())
 
 ------------------------------------------------------------------------
 -- ** Convenience functions
@@ -668,9 +665,8 @@ gcParTotBytesCopied = Stats.parAvgBytesCopied
 -- | Deregister all metrics (of any type) with the given name.
 deregisterByName :: T.Text -> Store -> IO ()
 deregisterByName name store =
-    atomicModifyIORef (storeState store) $ \state ->
-        let !state' = deregisterByName' name state
-        in  (state', ())
+    atomicModifyIORef' (storeState store) $ \state ->
+        (deregisterByName' name state, ())
 
 ------------------------------------------------------------------------
 -- * Sampling metrics
