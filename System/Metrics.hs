@@ -82,6 +82,7 @@ import Data.Int (Int64)
 import qualified Data.IntMap.Strict as IM
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import qualified Data.HashMap.Strict as M
+import qualified Data.HashSet as S
 import Data.List (foldl')
 import qualified Data.Text as T
 import GHC.Generics
@@ -169,6 +170,26 @@ instance Hashable Identifier
 
 ------------------------------------------------------------------------
 -- Internal state manipulation
+
+-- | Verify the internal consistency of the state.
+verifyState :: State -> Bool
+verifyState State{..} =
+      groupsFromGroups == groupsFromMetrics
+  &&  maybe True (< stateNextId) largestGroupId
+  where
+    groupsFromGroups = getSamplerIdentifiers <$> stateGroups
+    groupsFromMetrics =
+      foldl' insert_ IM.empty
+        [(id', groupId) | (id', Right groupId) <- M.toList stateMetrics]
+      where
+        insert_ im (name, groupId) = IM.alter (putName name) groupId im
+        putName identifier =
+            Just . maybe (S.singleton identifier) (S.insert identifier)
+
+    largestGroupId = fst <$> IM.lookupMax stateGroups
+
+getSamplerIdentifiers :: GroupSampler -> S.HashSet Identifier
+getSamplerIdentifiers GroupSampler{..} = M.keysSet groupSamplerMetrics
 
 -- Delete an identifier and its associated metric. When no metric is
 -- registered at the identifier, the original state is returned.
