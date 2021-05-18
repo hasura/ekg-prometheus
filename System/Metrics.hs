@@ -1,8 +1,5 @@
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 -- | A module for defining metrics that can be monitored.
 --
@@ -41,10 +38,8 @@ module System.Metrics
       -- * The metric store
       -- $metric-store
       Store
-    , newStore
-
-      -- * Metric identifiers
     , Identifier (..)
+    , newStore
 
       -- * Registering metrics
       -- $registering
@@ -76,16 +71,11 @@ module System.Metrics
     ) where
 
 import Control.Applicative ((<$>))
-import Control.Monad (forM)
-import Data.Hashable
 import Data.Int (Int64)
-import qualified Data.IntMap.Strict as IM
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import qualified Data.HashMap.Strict as M
-import qualified Data.HashSet as S
 import Data.List (foldl')
 import qualified Data.Text as T
-import GHC.Generics
 import qualified GHC.Stats as Stats
 import Prelude hiding (read)
 
@@ -95,6 +85,8 @@ import System.Metrics.Distribution (Distribution)
 import qualified System.Metrics.Distribution as Distribution
 import System.Metrics.Gauge (Gauge)
 import qualified System.Metrics.Gauge as Gauge
+import System.Metrics.Internal hiding (deregisterByName, sampleAll)
+import qualified System.Metrics.Internal as Internal
 import System.Metrics.Label (Label)
 import qualified System.Metrics.Label as Label
 
@@ -129,144 +121,9 @@ import qualified System.Metrics.Label as Label
 -- | A mutable metric store.
 newtype Store = Store { storeState :: IORef State }
 
-type GroupId = Int
-
--- | The 'Store' state.
-data State = State
-     { stateMetrics :: !(M.HashMap Identifier (Either MetricSampler GroupId))
-     , stateGroups  :: !(IM.IntMap GroupSampler)
-     , stateNextId  :: {-# UNPACK #-} !Int
-     }
-
-data GroupSampler = forall a. GroupSampler
-     { groupSampleAction   :: !(IO a)
-     , groupSamplerMetrics :: !(M.HashMap Identifier (a -> Value))
-     }
-
--- TODO: Rename this to Metric and Metric to SampledMetric.
-data MetricSampler = CounterS !(IO Int64)
-                   | GaugeS !(IO Int64)
-                   | LabelS !(IO T.Text)
-                   | DistributionS !(IO Distribution.Stats)
-
 -- | Create a new, empty metric store.
 newStore :: IO Store
-newStore = do
-    state <- newIORef $ State M.empty IM.empty 0
-    return $ Store state
-
-------------------------------------------------------------------------
--- * Metric identifiers
-
--- Documentation TODO
-
-data Identifier = Identifier
-    { idName :: T.Text
-    , idTags :: M.HashMap T.Text T.Text
-    }
-    deriving (Eq, Generic, Show)
-
-instance Hashable Identifier
-
-------------------------------------------------------------------------
--- Internal state manipulation
-
--- | Verify the internal consistency of the state.
-verifyState :: State -> Bool
-verifyState State{..} =
-      groupsFromGroups == groupsFromMetrics
-  &&  maybe True (< stateNextId) largestGroupId
-  where
-    groupsFromGroups = getSamplerIdentifiers <$> stateGroups
-    groupsFromMetrics =
-      foldl' insert_ IM.empty
-        [(id', groupId) | (id', Right groupId) <- M.toList stateMetrics]
-      where
-        insert_ im (name, groupId) = IM.alter (putName name) groupId im
-        putName identifier =
-            Just . maybe (S.singleton identifier) (S.insert identifier)
-
-    largestGroupId = fst <$> IM.lookupMax stateGroups
-
-getSamplerIdentifiers :: GroupSampler -> S.HashSet Identifier
-getSamplerIdentifiers GroupSampler{..} = M.keysSet groupSamplerMetrics
-
--- Delete an identifier and its associated metric. When no metric is
--- registered at the identifier, the original state is returned.
-delete :: Identifier -> State -> State
-delete identifier state@State{..} =
-    case M.lookup identifier stateMetrics of
-        Nothing -> state
-        Just (Left _) -> State
-            { stateMetrics = M.delete identifier stateMetrics
-            , stateGroups = stateGroups
-            , stateNextId = stateNextId
-            }
-        Just (Right groupID) -> State
-            { stateMetrics = M.delete identifier stateMetrics
-            , stateGroups =
-                let delete_ = overSamplerMetrics $ \hm ->
-                        let hm' = M.delete identifier hm
-                        in  if M.null hm' then Nothing else Just hm'
-                in  IM.update delete_ groupID stateGroups
-            , stateNextId = stateNextId
-            }
-
-overSamplerMetrics ::
-  (Functor f) =>
-  (forall a. M.HashMap Identifier a -> f (M.HashMap Identifier a)) ->
-  GroupSampler ->
-  f GroupSampler
-overSamplerMetrics f GroupSampler{..} =
-  flip fmap (f groupSamplerMetrics) $ \groupSamplerMetrics' ->
-      GroupSampler
-          { groupSampleAction = groupSampleAction
-          , groupSamplerMetrics = groupSamplerMetrics'
-          }
-
-insert :: Identifier -> MetricSampler -> State -> State
-insert identifier sample state = state
-    { stateMetrics =
-        M.insert identifier (Left sample) $ stateMetrics state
-    }
-
-register' :: Identifier -> MetricSampler -> State -> State
-register' identifier sample =
-  insert identifier sample . delete identifier
-
-insertGroup
-    :: M.HashMap Identifier
-       (a -> Value)  -- ^ Metric identifiers and getter functions
-    -> IO a          -- ^ Action to sample the metric group
-    -> State
-    -> State
-insertGroup getters cb State{..} = State
-    { stateMetrics =
-        M.foldlWithKey' (register_ stateNextId) stateMetrics getters
-    , stateGroups =
-        IM.insert stateNextId (GroupSampler cb getters) stateGroups
-    , stateNextId = stateNextId + 1
-    }
-  where
-    register_ groupId metrics name _ =
-        M.insert name (Right groupId) metrics
-
-registerGroup'
-    :: M.HashMap Identifier
-       (a -> Value)  -- ^ Metric identifiers and getter functions
-    -> IO a          -- ^ Action to sample the metric group
-    -> State
-    -> State
-registerGroup' getters cb =
-  insertGroup getters cb . delete_
-  where
-    delete_ state = foldl' (flip delete) state (M.keys getters)
-
-deregisterByName' :: T.Text -> State -> State
-deregisterByName' name state =
-    let identifiers = -- to remove
-          filter (\i -> name == idName i) $ M.keys $ stateMetrics state
-    in  foldl' (flip delete) state identifiers
+newStore = Store <$> newIORef initialState
 
 ------------------------------------------------------------------------
 -- * Registering metrics
@@ -323,6 +180,10 @@ register identifier sample store =
     atomicModifyIORef' (storeState store) $ \state ->
         (register' identifier sample state, ())
 
+register' :: Identifier -> MetricSampler -> State -> State
+register' identifier sample =
+  insert identifier sample . delete identifier
+
 -- | Register an action that will be executed any time one of the
 -- metrics computed from the value it returns needs to be sampled.
 --
@@ -375,6 +236,17 @@ registerGroup
 registerGroup getters cb store = do
     atomicModifyIORef' (storeState store) $ \state ->
         (registerGroup' getters cb state, ())
+
+registerGroup'
+    :: M.HashMap Identifier
+       (a -> Value)  -- ^ Metric identifiers and getter functions
+    -> IO a          -- ^ Action to sample the metric group
+    -> State
+    -> State
+registerGroup' getters cb = insertGroup getters cb . delete_
+  where
+    delete_ state = foldl' (flip delete) state (M.keys getters)
+
 
 ------------------------------------------------------------------------
 -- ** Convenience functions
@@ -687,7 +559,7 @@ gcParTotBytesCopied = Stats.parAvgBytesCopied
 deregisterByName :: T.Text -> Store -> IO ()
 deregisterByName name store =
     atomicModifyIORef' (storeState store) $ \state ->
-        (deregisterByName' name state, ())
+        (Internal.deregisterByName name state, ())
 
 ------------------------------------------------------------------------
 -- * Sampling metrics
@@ -699,50 +571,8 @@ deregisterByName name store =
 -- 'registerGroup' for an explanation of how to sample a subset of all
 -- metrics atomically.
 
--- | A sample of some metrics.
-type Sample = M.HashMap Identifier Value
-
 -- | Sample all metrics. Sampling is /not/ atomic in the sense that
 -- some metrics might have been mutated before they're sampled but
 -- after some other metrics have already been sampled.
 sampleAll :: Store -> IO Sample
-sampleAll store = do
-    state <- readIORef (storeState store)
-    let metrics = stateMetrics state
-        groups = stateGroups state
-    cbSample <- sampleGroups $ IM.elems groups
-    sample <- readAllRefs metrics
-    let allSamples = sample ++ cbSample
-    return $! M.fromList allSamples
-
--- | Sample all metric groups.
-sampleGroups :: [GroupSampler] -> IO [(Identifier, Value)]
-sampleGroups cbSamplers = concat `fmap` sequence (map runOne cbSamplers)
-  where
-    runOne :: GroupSampler -> IO [(Identifier, Value)]
-    runOne GroupSampler{..} = do
-        a <- groupSampleAction
-        return $! map (\ (identifier, f) -> (identifier, f a))
-                      (M.toList groupSamplerMetrics)
-
--- | The value of a sampled metric.
-data Value = Counter {-# UNPACK #-} !Int64
-           | Gauge {-# UNPACK #-} !Int64
-           | Label {-# UNPACK #-} !T.Text
-           | Distribution !Distribution.Stats
-           deriving (Eq, Show)
-
-sampleOne :: MetricSampler -> IO Value
-sampleOne (CounterS m)      = Counter <$> m
-sampleOne (GaugeS m)        = Gauge <$> m
-sampleOne (LabelS m)        = Label <$> m
-sampleOne (DistributionS m) = Distribution <$> m
-
--- | Get a snapshot of all values.  Note that we're not guaranteed to
--- see a consistent snapshot of the whole map.
-readAllRefs :: M.HashMap Identifier (Either MetricSampler GroupId)
-            -> IO [(Identifier, Value)]
-readAllRefs m = do
-    forM ([(name, ref) | (name, Left ref) <- M.toList m]) $ \ (name, ref) -> do
-        val <- sampleOne ref
-        return (name, val)
+sampleAll (Store store) = readIORef store >>= Internal.sampleAll

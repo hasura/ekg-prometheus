@@ -25,6 +25,7 @@ library
     System.Metrics.Distribution
     System.Metrics.Distribution.Internal
     System.Metrics.Gauge
+    System.Metrics.Internal
     System.Metrics.Label
 
   other-modules:
