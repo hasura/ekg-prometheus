@@ -3,6 +3,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 -- | A module for defining metrics that can be monitored.
 --
@@ -74,11 +75,12 @@ module System.Metrics
 
 import Control.Applicative ((<$>))
 import Control.Monad (forM)
+import Data.Hashable
 import Data.Int (Int64)
 import qualified Data.IntMap.Strict as IM
 import Data.IORef (IORef, atomicModifyIORef, newIORef, readIORef)
-import Data.Hashable
 import qualified Data.HashMap.Strict as M
+import Data.List (foldl')
 import qualified Data.Text as T
 import GHC.Generics
 import qualified GHC.Stats as Stats
@@ -151,6 +153,42 @@ newStore = do
     return $ Store state
 
 ------------------------------------------------------------------------
+-- Internal state manipulation
+
+overSamplerMetrics ::
+  (Functor f) =>
+  (forall a. M.HashMap Identifier a -> f (M.HashMap Identifier a)) ->
+  GroupSampler ->
+  f GroupSampler
+overSamplerMetrics f GroupSampler{..} =
+  flip fmap (f groupSamplerMetrics) $ \groupSamplerMetrics' ->
+      GroupSampler
+          { groupSampleAction = groupSampleAction
+          , groupSamplerMetrics = groupSamplerMetrics'
+          }
+
+-- Delete an identifier and its associated metric. When no metric is
+-- registered at the identifier, the original state is returned.
+delete :: Identifier -> State -> State
+delete identifier state@State{..} =
+    case M.lookup identifier stateMetrics of
+        Nothing -> state
+        Just (Left _) -> State
+            { stateMetrics = M.delete identifier stateMetrics
+            , stateGroups = stateGroups
+            , stateNextId = stateNextId
+            }
+        Just (Right groupID) -> State
+            { stateMetrics = M.delete identifier stateMetrics
+            , stateGroups =
+                let delete_ = overSamplerMetrics $ \hm ->
+                        let hm' = M.delete identifier hm
+                        in  if M.null hm' then Nothing else Just hm'
+                in  IM.update delete_ groupID stateGroups
+            , stateNextId = stateNextId
+            }
+
+------------------------------------------------------------------------
 -- * Metric identifiers
 
 -- Documentation TODO
@@ -168,9 +206,8 @@ instance Hashable Identifier
 
 -- $registering
 -- Before metrics can be sampled they need to be registered with the
--- metric store. The same metric name can only be used once. Passing a
--- metric name that has already been used to one of the register
--- function is an 'error'.
+-- metric store. Passing a metric identifier that has already been used
+-- to one of the register functions will replace the existing metric.
 
 -- | Register a non-negative, monotonically increasing, integer-valued
 -- metric. The provided action to read the value must be thread-safe.
@@ -215,27 +252,14 @@ register :: Identifier
          -> MetricSampler
          -> Store
          -> IO ()
-register identifier sample store = do
-    atomicModifyIORef (storeState store) $ \ state@State{..} ->
-        case M.member identifier stateMetrics of
-            False -> let !state' = state {
-                               stateMetrics = M.insert identifier
-                                              (Left sample)
-                                              stateMetrics
-                             }
-                     in (state', ())
-            True  -> alreadyInUseError identifier
-
--- | Raise an exception indicating that the metric name is already in
--- use.
-alreadyInUseError :: Identifier -> a
-alreadyInUseError identifier =
-    error $ concat -- TODO: Show full identifier in error
-        [ "The name \""
-        , show (name identifier)
-        , "\" is already taken "
-        , "by a metric."
-        ]
+register identifier sample store =
+    atomicModifyIORef (storeState store) $ \state ->
+        let !state' = delete identifier state
+            !state'' = state'
+                { stateMetrics =
+                    M.insert identifier (Left sample) $ stateMetrics state'
+                }
+        in (state'', ())
 
 -- | Register an action that will be executed any time one of the
 -- metrics computed from the value it returns needs to be sampled.
@@ -287,20 +311,22 @@ registerGroup
     -> Store         -- ^ Metric store
     -> IO ()
 registerGroup getters cb store = do
-    atomicModifyIORef (storeState store) $ \ State{..} ->
-        let !state' = State
-                { stateMetrics = M.foldlWithKey' (register_ stateNextId)
-                                 stateMetrics getters
-                , stateGroups  = IM.insert stateNextId
-                                 (GroupSampler cb getters)
-                                 stateGroups
-                , stateNextId  = stateNextId + 1
-                }
-       in (state', ())
+    atomicModifyIORef (storeState store) $ \state ->
+        let !state' = foldl' (flip delete) state $ M.keys getters
+            !state'' =
+                let groupId = stateNextId state'
+                in  State
+                    { stateMetrics = M.foldlWithKey' (register_ groupId)
+                                      (stateMetrics state') getters
+                    , stateGroups  = IM.insert groupId
+                                      (GroupSampler cb getters)
+                                      (stateGroups state')
+                    , stateNextId  = groupId + 1
+                    }
+       in  (state'', ())
   where
-    register_ groupId metrics name _ = case M.lookup name metrics of
-        Nothing -> M.insert name (Right groupId) metrics
-        Just _  -> alreadyInUseError name
+    register_ groupId metrics name _ =
+        M.insert name (Right groupId) metrics
 
 ------------------------------------------------------------------------
 -- ** Convenience functions
