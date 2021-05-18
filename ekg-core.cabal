@@ -71,6 +71,17 @@ benchmark distribution
   hs-source-dirs: benchmarks
   ghc-options: -O2 -threaded -Wall
 
+test-suite ekg-core-test
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: Spec.hs
+  build-depends:
+    base,
+    ekg-core,
+    smallcheck < 1.3,
+    text < 1.3,
+    unordered-containers < 0.3
+
 source-repository head
   type:     git
   location: https://github.com/tibbe/ekg-core.git

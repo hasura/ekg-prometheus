@@ -1,3 +1,6 @@
 cradle:
   cabal:
-    component: "lib:ekg-core"
+    - path: "."
+      component: "lib:ekg-core"
+    - path: "./test"
+      component: "test:ekg-core-test"
