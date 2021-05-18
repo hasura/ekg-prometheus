@@ -156,6 +156,19 @@ newStore = do
     return $ Store state
 
 ------------------------------------------------------------------------
+-- * Metric identifiers
+
+-- Documentation TODO
+
+data Identifier = Identifier
+    { idName :: T.Text
+    , idTags :: M.HashMap T.Text T.Text
+    }
+    deriving (Eq, Generic, Show)
+
+instance Hashable Identifier
+
+------------------------------------------------------------------------
 -- Internal state manipulation
 
 -- Delete an identifier and its associated metric. When no metric is
@@ -234,19 +247,6 @@ deregisterByName' name state =
     let identifiers = -- to remove
           filter (\i -> name == idName i) $ M.keys $ stateMetrics state
     in  foldl' (flip delete) state identifiers
-
-------------------------------------------------------------------------
--- * Metric identifiers
-
--- Documentation TODO
-
-data Identifier = Identifier
-    { idName :: T.Text
-    , idTags :: M.HashMap T.Text T.Text
-    }
-    deriving (Eq, Generic, Show)
-
-instance Hashable Identifier
 
 ------------------------------------------------------------------------
 -- * Registering metrics
