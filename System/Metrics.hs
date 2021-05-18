@@ -66,6 +66,9 @@ module System.Metrics
       -- $predefined
     , registerGcMetrics
 
+      -- * Deregistering metrics
+    , deregisterByName
+
       -- * Sampling metrics
       -- $sampling
     , Sample
@@ -194,8 +197,8 @@ delete identifier state@State{..} =
 -- Documentation TODO
 
 data Identifier = Identifier
-    { name :: T.Text
-    , tags :: M.HashMap T.Text T.Text
+    { idName :: T.Text
+    , idTags :: M.HashMap T.Text T.Text
     }
     deriving (Eq, Generic, Show)
 
@@ -629,6 +632,22 @@ gcParTotBytesCopied = Stats.parTotBytesCopied
 gcParTotBytesCopied = Stats.parAvgBytesCopied
 # endif
 #endif
+
+------------------------------------------------------------------------
+-- * Deregistering metrics
+
+-- Documentation TODO
+
+-- | Deregister all metrics (of any type) with the given name.
+deregisterByName :: T.Text -> Store -> IO ()
+deregisterByName name store =
+    atomicModifyIORef (storeState store) $ \state ->
+        let identifiers = -- to remove
+              filter (\i -> name == idName i) $
+                M.keys $
+                  stateMetrics state
+            !state' = foldl' (flip delete) state identifiers
+        in (state', ())
 
 ------------------------------------------------------------------------
 -- * Sampling metrics
