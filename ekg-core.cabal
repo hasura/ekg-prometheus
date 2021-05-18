@@ -27,11 +27,13 @@ library
     System.Metrics.Gauge
     System.Metrics.Internal
     System.Metrics.Label
+    System.Metrics.Static
 
   other-modules:
     Data.Array
     Data.Atomic
     System.Metrics.ThreadId
+    System.Metrics.Testing
 
   build-depends:
     ghc-prim < 0.7,
