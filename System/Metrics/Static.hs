@@ -7,6 +7,7 @@ module System.Metrics.Static
   (
     -- * Static metric annotations
     MetricType (..)
+  , ToTags (..)
 
     -- * The metric store
   , Store
@@ -47,9 +48,18 @@ data MetricType
   | Gauge
 
 ------------------------------------------------------------------------
+-- * Tags
+
+class ToTags a where
+  toTags ::  a -> M.HashMap T.Text T.Text
+
+instance ToTags () where
+  toTags () = M.empty
+
+------------------------------------------------------------------------
 -- * The metric store
 
-newtype Store (f :: MetricType -> Symbol -> *) =
+newtype Store (f :: MetricType -> Symbol -> * -> *) =
   Store { runStore :: Metrics.Store }
 
 newStore :: IO (Store f)
@@ -59,56 +69,56 @@ newStore = Store <$> Metrics.newStore
 -- * Registering metrics
 
 registerCounter ::
-  forall f name.
-  (KnownSymbol name) =>
-  f 'Counter name ->
-  M.HashMap T.Text T.Text ->
+  forall f name tags.
+  (KnownSymbol name, ToTags tags) =>
+  f 'Counter name tags ->
+  tags ->
   IO Int64 ->
   Store f ->
   IO ()
 registerCounter _ tags sample (Store store) =
   let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name tags
+      identifier = Metrics.Identifier name (toTags tags)
   in  Metrics.registerCounter identifier sample store
 
 registerGauge ::
-  forall f name.
-  (KnownSymbol name) =>
-  f 'Gauge name ->
-  M.HashMap T.Text T.Text ->
+  forall f name tags.
+  (KnownSymbol name, ToTags tags) =>
+  f 'Gauge name tags ->
+  tags ->
   IO Int64 ->
   Store f ->
   IO ()
 registerGauge _ tags sample (Store store) =
   let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name tags
+      identifier = Metrics.Identifier name (toTags tags)
   in  Metrics.registerGauge identifier sample store
 
 ------------------------------------------------------------------------
 -- ** Convenience functions
 
 createCounter ::
-  forall f name.
-  (KnownSymbol name) =>
-  f 'Counter name ->
-  M.HashMap T.Text T.Text ->
+  forall f name tags.
+  (KnownSymbol name, ToTags tags) =>
+  f 'Counter name tags ->
+  tags ->
   Store f ->
   IO Counter.Counter
 createCounter _ tags (Store store) =
   let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name tags
+      identifier = Metrics.Identifier name (toTags tags)
   in  Metrics.createCounter identifier store
 
 createGauge ::
-  forall f name.
-  (KnownSymbol name) =>
-  f 'Gauge name ->
-  M.HashMap T.Text T.Text ->
+  forall f name tags.
+  (KnownSymbol name, ToTags tags) =>
+  f 'Gauge name tags ->
+  tags ->
   Store f ->
   IO Gauge.Gauge
 createGauge _ tags (Store store) =
   let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name tags
+      identifier = Metrics.Identifier name (toTags tags)
   in  Metrics.createGauge identifier store
 
 ------------------------------------------------------------------------
