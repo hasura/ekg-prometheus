@@ -10,9 +10,11 @@ import qualified Data.HashMap.Strict as M
 import qualified Data.Text as T
 import GHC.Generics
 import System.Exit
-import Test.SmallCheck
-import Test.SmallCheck.Drivers
-import Test.SmallCheck.Series
+import Test.Hspec
+import qualified Test.Hspec.SmallCheck as SC
+import qualified Test.SmallCheck as SC
+import qualified Test.SmallCheck.Drivers as SC
+import qualified Test.SmallCheck.Series as SC
 
 import System.Metrics.Internal
 
@@ -58,11 +60,11 @@ data TestIdentifierGroup
   deriving (Generic, Show)
 
 -- Smallcheck instances
-instance (Monad m) => Serial m TestOperation
-instance (Monad m) => Serial m TestIdentifier
-instance (Monad m) => Serial m TestName
-instance (Monad m) => Serial m TestTagSet
-instance (Monad m) => Serial m TestIdentifierGroup
+instance (Monad m) => SC.Serial m TestOperation
+instance (Monad m) => SC.Serial m TestIdentifier
+instance (Monad m) => SC.Serial m TestName
+instance (Monad m) => SC.Serial m TestTagSet
+instance (Monad m) => SC.Serial m TestIdentifierGroup
 
 -- ** Rendering functions
 --
@@ -117,17 +119,12 @@ renderIdentifierGroup testGroup =
 ------------------------------------------------------------------------
 
 main :: IO ()
-main = do
-  mPropFailure <-
-    -- Using depth=5 yields sequences of operations up to length 3
-    smallCheckM 5 $ forAll verifyOps
-  case mPropFailure of
-    Nothing -> void exitSuccess
-    Just propFailure -> do
-      putStrLn "Test failed: Verify internal consistency of store state"
-      print propFailure
-      void exitFailure
-  where
-    verifyOps :: [TestOperation] -> Bool
-    verifyOps ops =
-      verifyState $ foldl' (flip renderOperation) initialState ops
+main = hspec $ do
+  describe "Operations on the internal state" $ do
+    let verifyOps :: [TestOperation] -> Bool
+        verifyOps ops =
+          verifyState $ foldl' (flip renderOperation) initialState ops
+    it "preserve internal consistency (smallcheck)" $
+      -- A depth of 5 yields sequences of operations up to length 3.
+      -- The test takes too long if we go any deeper.
+      SC.property $ SC.changeDepth (const 5) $ SC.forAll verifyOps

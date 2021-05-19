@@ -1,4 +1,4 @@
-cabal-version:       1.18
+cabal-version:       2.0
 name:                ekg-core
 version:             0.1.1.7
 synopsis:            Tracking of system metrics
@@ -78,7 +78,9 @@ test-suite ekg-core-test
   build-depends:
     base,
     ekg-core,
-    smallcheck < 1.3,
+    hspec ^>= 2.8.2,
+    hspec-smallcheck ^>= 0.5.2,
+    smallcheck ^>= 1.2.1,
     text < 1.3,
     unordered-containers < 0.3
 
