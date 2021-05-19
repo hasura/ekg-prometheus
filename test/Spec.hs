@@ -20,7 +20,7 @@ import System.Metrics.Internal
 -- * Operations
 
 data TestOperation
-  = TestDelete TestIdentifier
+  = TestDeregister TestIdentifier
   | TestRegister TestIdentifier
   | TestRegisterGroup TestIdentifierGroup
   | TestDeregisterByName TestName
@@ -51,7 +51,7 @@ instance (Monad m) => Serial m TestIdentifierGroup
 
 renderOperation :: TestOperation -> State -> State
 renderOperation testOp = case testOp of
-  TestDelete id' -> delete (renderIdentifier id')
+  TestDeregister id' -> deregister (renderIdentifier id')
   TestRegister id' -> register (renderIdentifier id') (CounterS (pure 0))
   TestRegisterGroup idGroup ->
     registerGroup (renderIdentifierGroup idGroup) (pure 0)

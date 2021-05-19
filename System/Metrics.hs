@@ -278,7 +278,7 @@ createDistribution identifier store = do
     return event
 
 ------------------------------------------------------------------------
--- * Predefined metrics
+-- ** Predefined metrics
 
 -- $predefined
 -- This library provides a number of pre-defined metrics that can
@@ -540,7 +540,8 @@ gcParTotBytesCopied = Stats.parAvgBytesCopied
 
 -- Documentation TODO
 
--- | Deregister all metrics (of any type) with the given name.
+-- | Deregister all metrics (of any type) with the given name, ignoring
+-- tags.
 deregisterByName :: T.Text -> Store -> IO ()
 deregisterByName name store =
     atomicModifyIORef' (storeState store) $ \state ->
