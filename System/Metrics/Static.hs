@@ -1,7 +1,12 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 
 module System.Metrics.Static
   (
@@ -35,6 +40,7 @@ import qualified Data.HashMap.Strict as M
 import Data.Int (Int64)
 import Data.Proxy
 import qualified Data.Text as T
+import GHC.Generics
 import GHC.TypeLits
 import qualified System.Metrics as Metrics
 import qualified System.Metrics.Counter as Counter
@@ -51,10 +57,53 @@ data MetricType
 -- * Tags
 
 class ToTags a where
-  toTags ::  a -> M.HashMap T.Text T.Text
+  toTags :: a -> M.HashMap T.Text T.Text
+
+  default toTags ::
+    (Generic a, GToTags (Rep a)) => a -> M.HashMap T.Text T.Text
+  toTags x = gToTags "" (from x)
+  {-# INLINE toTags #-}
 
 instance ToTags () where
   toTags () = M.empty
+  {-# INLINE toTags #-}
+
+------------------------------------------------------------------------
+-- * Deriving ToTags
+--
+-- Deriving instances of `ToTags` for records that exclusively have
+-- fields of type `Text`.
+
+class GToTags (f :: * -> *) where
+  gToTags :: T.Text -> f x -> M.HashMap T.Text T.Text
+
+-- Data (passthrough)
+instance (GToTags f) => GToTags (D1 c f) where
+  gToTags name (M1 x) = gToTags name x
+  {-# INLINE gToTags #-}
+
+-- Constructor (passthrough)
+instance (GToTags f) => GToTags (C1 c f) where
+  gToTags name (M1 x) = gToTags name x
+  {-# INLINE gToTags #-}
+
+-- Products (union)
+instance (GToTags f, GToTags g) => GToTags (f :*: g) where
+  gToTags name (x :*: y) = gToTags name x `M.union` gToTags name y
+  {-# INLINE gToTags #-}
+
+-- Record selectors (take record selector name)
+instance (GToTags f, KnownSymbol name) =>
+  GToTags (S1 ('MetaSel ('Just name) su ss ds) f) where
+  gToTags _name (M1 x) =
+    let name' = T.pack $ symbolVal $ Proxy @name
+    in  gToTags name' x
+  {-# INLINE gToTags #-}
+
+-- Individual fields (take value, combine with name)
+instance GToTags (K1 i T.Text) where
+  gToTags name (K1 x) = M.singleton name x
+  {-# INLINE gToTags #-}
 
 ------------------------------------------------------------------------
 -- * The metric store

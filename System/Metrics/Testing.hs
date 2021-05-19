@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -10,6 +11,7 @@ module System.Metrics.Testing
 import Data.Foldable (for_)
 import qualified Data.HashMap.Strict as M
 import qualified Data.Text as T
+import GHC.Generics
 import GHC.TypeLits
 import System.Metrics.Static
 import qualified System.Metrics.Counter as Counter
@@ -24,20 +26,17 @@ data MyMetrics (t :: MetricType) (name :: Symbol) (tags :: *) where
 
 
 newtype EndpointTags = EndpointTags { endpointLabel :: T.Text }
+  deriving (Generic)
 
-instance ToTags EndpointTags where
-  toTags tags = M.singleton "endpoint" (endpointLabel tags)
+instance ToTags EndpointTags
 
 data DataSourceTags = DataSourceTags
   { sourceName :: T.Text
   , connInfo :: T.Text
   }
+  deriving (Generic)
 
-instance ToTags DataSourceTags where
-  toTags tags = M.fromList
-    [ ("sourceName", sourceName tags)
-    , ("connInfo", connInfo tags)
-    ]
+instance ToTags DataSourceTags
 
 ------------------------------------------------------------------------
 
