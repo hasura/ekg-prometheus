@@ -16,8 +16,8 @@ module System.Metrics.Internal
 
       -- * State operations
     , delete
-    , insert
-    , insertGroup
+    , register
+    , registerGroup
     , deregisterByName
 
       -- * Sampling metrics
@@ -133,11 +133,25 @@ overSamplerMetrics f GroupSampler{..} =
           , groupSamplerMetrics = groupSamplerMetrics'
           }
 
+register :: Identifier -> MetricSampler -> State -> State
+register identifier sample =
+  insert identifier sample . delete identifier
+
 insert :: Identifier -> MetricSampler -> State -> State
 insert identifier sample state = state
     { stateMetrics =
         M.insert identifier (Left sample) $ stateMetrics state
     }
+
+registerGroup
+    :: M.HashMap Identifier
+       (a -> Value)  -- ^ Metric identifiers and getter functions
+    -> IO a          -- ^ Action to sample the metric group
+    -> State
+    -> State
+registerGroup getters cb = insertGroup getters cb . delete_
+  where
+    delete_ state = foldl' (flip delete) state (M.keys getters)
 
 insertGroup
     :: M.HashMap Identifier
@@ -145,13 +159,19 @@ insertGroup
     -> IO a          -- ^ Action to sample the metric group
     -> State
     -> State
-insertGroup getters cb State{..} = State
-    { stateMetrics =
-        M.foldlWithKey' (register_ stateNextId) stateMetrics getters
-    , stateGroups =
-        IM.insert stateNextId (GroupSampler cb getters) stateGroups
-    , stateNextId = stateNextId + 1
-    }
+insertGroup getters cb state
+  | M.null getters = state
+  | otherwise =
+      let State{..} = state
+      in  State
+            { stateMetrics =
+                M.foldlWithKey'
+                  (register_ stateNextId) stateMetrics getters
+            , stateGroups =
+                IM.insert
+                  stateNextId (GroupSampler cb getters) stateGroups
+            , stateNextId = stateNextId + 1
+            }
   where
     register_ groupId metrics name _ =
         M.insert name (Right groupId) metrics

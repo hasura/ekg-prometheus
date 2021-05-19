@@ -74,7 +74,6 @@ import Control.Applicative ((<$>))
 import Data.Int (Int64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import qualified Data.HashMap.Strict as M
-import Data.List (foldl')
 import qualified Data.Text as T
 import qualified GHC.Stats as Stats
 import Prelude hiding (read)
@@ -85,7 +84,8 @@ import System.Metrics.Distribution (Distribution)
 import qualified System.Metrics.Distribution as Distribution
 import System.Metrics.Gauge (Gauge)
 import qualified System.Metrics.Gauge as Gauge
-import System.Metrics.Internal hiding (deregisterByName, sampleAll)
+import System.Metrics.Internal
+  hiding (deregisterByName, register, registerGroup, sampleAll)
 import qualified System.Metrics.Internal as Internal
 import System.Metrics.Label (Label)
 import qualified System.Metrics.Label as Label
@@ -178,11 +178,7 @@ register :: Identifier
          -> IO ()
 register identifier sample store =
     atomicModifyIORef' (storeState store) $ \state ->
-        (register' identifier sample state, ())
-
-register' :: Identifier -> MetricSampler -> State -> State
-register' identifier sample =
-  insert identifier sample . delete identifier
+        (Internal.register identifier sample state, ())
 
 -- | Register an action that will be executed any time one of the
 -- metrics computed from the value it returns needs to be sampled.
@@ -235,18 +231,7 @@ registerGroup
     -> IO ()
 registerGroup getters cb store = do
     atomicModifyIORef' (storeState store) $ \state ->
-        (registerGroup' getters cb state, ())
-
-registerGroup'
-    :: M.HashMap Identifier
-       (a -> Value)  -- ^ Metric identifiers and getter functions
-    -> IO a          -- ^ Action to sample the metric group
-    -> State
-    -> State
-registerGroup' getters cb = insertGroup getters cb . delete_
-  where
-    delete_ state = foldl' (flip delete) state (M.keys getters)
-
+        (Internal.registerGroup getters cb state, ())
 
 ------------------------------------------------------------------------
 -- ** Convenience functions

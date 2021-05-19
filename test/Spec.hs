@@ -21,8 +21,8 @@ import System.Metrics.Internal
 
 data TestOperation
   = TestDelete TestIdentifier
-  | TestInsert TestIdentifier
-  | TestInsertGroup TestIdentifierGroup
+  | TestRegister TestIdentifier
+  | TestRegisterGroup TestIdentifierGroup
   | TestDeregisterByName TestName
   deriving (Generic, Show)
 
@@ -52,9 +52,9 @@ instance (Monad m) => Serial m TestIdentifierGroup
 renderOperation :: TestOperation -> State -> State
 renderOperation testOp = case testOp of
   TestDelete id' -> delete (renderIdentifier id')
-  TestInsert id' -> insert (renderIdentifier id') (CounterS (pure 0))
-  TestInsertGroup idGroup ->
-    insertGroup (renderIdentifierGroup idGroup) (pure 0)
+  TestRegister id' -> register (renderIdentifier id') (CounterS (pure 0))
+  TestRegisterGroup idGroup ->
+    registerGroup (renderIdentifierGroup idGroup) (pure 0)
   TestDeregisterByName name -> deregisterByName (renderName name)
 
 renderIdentifier :: TestIdentifier -> Identifier
