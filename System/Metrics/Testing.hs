@@ -8,57 +8,45 @@ module System.Metrics.Testing
   ( main
   ) where
 
-import Data.Foldable (for_)
-import qualified Data.HashMap.Strict as M
 import qualified Data.Text as T
 import GHC.Generics
 import GHC.TypeLits
-import System.Metrics.Static
 import qualified System.Metrics.Counter as Counter
 import qualified System.Metrics.Gauge as Gauge
-
-------------------------------------------------------------------------
+import System.Metrics.Static
 
 data MyMetrics (t :: MetricType) (name :: Symbol) (tags :: *) where
-  CrunchyRequests :: MyMetrics 'Counter "requests.crunchy" EndpointTags
-  SpicyRequests :: MyMetrics 'Counter "requests.spicy" EndpointTags
-  DBConnections :: MyMetrics 'Gauge "connections.db" DataSourceTags
-
+  Requests ::
+    MyMetrics 'Counter "requests" EndpointTags
+  DBConnections ::
+    MyMetrics 'Gauge "postgres.total_connections" DataSourceTags
 
 newtype EndpointTags = EndpointTags { endpointLabel :: T.Text }
   deriving (Generic)
-
 instance ToTags EndpointTags
 
 data DataSourceTags = DataSourceTags
   { sourceName :: T.Text
   , connInfo :: T.Text
-  }
-  deriving (Generic)
-
+  } deriving (Generic)
 instance ToTags DataSourceTags
-
-------------------------------------------------------------------------
 
 main :: IO ()
 main = do
   store <- newStore
-  crunchyRequstsCounter <-
-    createCounter CrunchyRequests (EndpointTags "dev/harpsicord") store
-  spicyRequstsCounter <-
-    createCounter SpicyRequests (EndpointTags "dev/tabla") store
-  dbConnectionsGauge <-
+  harpsichordReqs <-
+    createCounter Requests (EndpointTags "dev/harpsichord") store
+  tablaReqs <-
+    createCounter Requests (EndpointTags "dev/tabla") store
+  dbConnections <-
     let tags = DataSourceTags
-          { sourceName = "testDB"
-          , connInfo = "hasura.io/learn"
+          { sourceName = "myDB"
+          , connInfo = "localhost:5432"
           }
     in  createGauge DBConnections tags store
 
-  for_ [(1 :: Int) ..1000] $ \_ -> do
-    Counter.inc crunchyRequstsCounter
-    Counter.inc spicyRequstsCounter
-    Gauge.inc dbConnectionsGauge
+  Counter.add harpsichordReqs 5
+  Counter.add tablaReqs 10
+  Gauge.set dbConnections 99
   stats <- sampleAll store
-  for_ (M.toList stats) $ \(identifier, value) -> do
-    print identifier
-    print value
+  print stats
