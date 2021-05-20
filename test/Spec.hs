@@ -8,10 +8,12 @@ import Control.Monad (void)
 import Data.List (foldl')
 import qualified Data.HashMap.Strict as M
 import qualified Data.Text as T
+import Generic.Random (genericArbitrary, uniform)
 import GHC.Generics
 import System.Exit
 import Test.Hspec
 import qualified Test.Hspec.SmallCheck as SC
+import qualified Test.QuickCheck as QC
 import qualified Test.SmallCheck as SC
 import qualified Test.SmallCheck.Drivers as SC
 import qualified Test.SmallCheck.Series as SC
@@ -65,6 +67,18 @@ instance (Monad m) => SC.Serial m TestIdentifier
 instance (Monad m) => SC.Serial m TestName
 instance (Monad m) => SC.Serial m TestTagSet
 instance (Monad m) => SC.Serial m TestIdentifierGroup
+
+-- Quickcheck instances
+instance QC.Arbitrary TestOperation where
+  arbitrary = genericArbitrary uniform
+instance QC.Arbitrary TestIdentifier where
+  arbitrary = genericArbitrary uniform
+instance QC.Arbitrary TestName where
+  arbitrary = genericArbitrary uniform
+instance QC.Arbitrary TestTagSet where
+  arbitrary = genericArbitrary uniform
+instance QC.Arbitrary TestIdentifierGroup where
+  arbitrary = genericArbitrary uniform
 
 -- ** Rendering functions
 --
@@ -120,11 +134,13 @@ renderIdentifierGroup testGroup =
 
 main :: IO ()
 main = hspec $ do
-  describe "Operations on the internal state" $ do
+  describe "A sequence of operations on the internal state" $ do
     let verifyOps :: [TestOperation] -> Bool
         verifyOps ops =
           verifyState $ foldl' (flip renderOperation) initialState ops
-    it "preserve internal consistency (smallcheck)" $
+    it "preserves internal consistency (smallcheck)" $
       -- A depth of 5 yields sequences of operations up to length 3.
       -- The test takes too long if we go any deeper.
       SC.property $ SC.changeDepth (const 5) $ SC.forAll verifyOps
+    it "preserves internal consistency (quickcheck)" $
+      QC.property verifyOps
