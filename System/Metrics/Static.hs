@@ -179,9 +179,14 @@ registerGcMetrics (Store store) = Metrics.registerGcMetrics store
 ------------------------------------------------------------------------
 -- * Deregistering metrics
 
-deregisterByName :: T.Text -> Store f -> IO ()
-deregisterByName name (Store store) =
-  Metrics.deregisterByName name store
+deregisterByName ::
+  forall f metricType name tags.
+  (KnownSymbol name) =>
+  f metricType name tags ->
+  Store f -> IO ()
+deregisterByName _ (Store store) =
+  let name = T.pack $ symbolVal (Proxy @name)
+  in  Metrics.deregisterByName name store
 
 ------------------------------------------------------------------------
 -- * Sampling metrics
