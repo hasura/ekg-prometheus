@@ -4,7 +4,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module System.Metrics.Testing
+module System.Metrics.Static.Example
   ( main
   ) where
 

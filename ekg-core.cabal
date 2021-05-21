@@ -32,8 +32,8 @@ library
   other-modules:
     Data.Array
     Data.Atomic
+    System.Metrics.Static.Example
     System.Metrics.ThreadId
-    System.Metrics.Testing
 
   build-depends:
     ghc-prim < 0.7,
