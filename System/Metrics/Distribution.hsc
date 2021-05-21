@@ -96,11 +96,14 @@ newCDistrib = do
         , cMean       = 0.0
         , cSumSqDelta = 0.0
         , cSum        = 0.0
-        , cMin        = 0.0
-        , cMax        = 0.0
+        , cMin        = inf
+        , cMax        = -inf
         , cLock       = 0
         }
     return fp
+  where
+    inf :: Double
+    inf = 1/0
 
 newStripe :: IO Stripe
 newStripe = do
@@ -155,11 +158,11 @@ read distrib = do
             combine p resultp
         peek resultp
     return $! Stats
-        { mean  = cMean
+        { mean  = if cCount == 0 then 0.0 else cMean
         , variance = if cCount == 0 then 0.0
                      else cSumSqDelta / fromIntegral cCount
         , count = cCount
         , sum   = cSum
-        , min   = cMin
-        , max   = cMax
+        , min   = if cCount == 0 then 0.0 else cMin
+        , max   = if cCount == 0 then 0.0 else cMax
         }

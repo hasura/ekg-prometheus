@@ -35,10 +35,10 @@ void hs_distrib_combine(struct distrib* b, struct distrib* a) {
   const StgDouble sum_sq_delta = (a->sum_sq_delta + b->sum_sq_delta +
                                   delta * delta * (a->count * b->count) / count);
   a->count = count;
-  a->mean = (count == 0) ? 0.0 : mean; // divide-by-zero gives NaN
+  a->mean = mean;
   a->sum_sq_delta = sum_sq_delta;
   a->sum = a->sum + b->sum;
-  a->min = b->min; // This is slightly hacky, but ok: see
-  a->max = b->max; // 813aa426be78e8abcf1c7cdd43433bcffa07828e
+  a->min = b->min < a->min ? b->min : a->min;
+  a->max = b->max > a->max ? b->max : a->max;
   hs_unlock(&b->lock);
 }

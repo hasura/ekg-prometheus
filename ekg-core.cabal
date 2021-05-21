@@ -77,13 +77,16 @@ test-suite ekg-core-test
   type: exitcode-stdio-1.0
   hs-source-dirs: test
   main-is: Spec.hs
-  other-modules: State
+  other-modules:
+    Distribution
+    State
   build-depends:
     base,
     ekg-core,
     generic-random ^>= 1.4.0.0,
     hspec ^>= 2.8.2,
     hspec-smallcheck ^>= 0.5.2,
+    HUnit ^>= 1.6.2.0,
     QuickCheck ^>= 2.14.2,
     smallcheck ^>= 1.2.1,
     text < 1.3,
