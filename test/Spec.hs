@@ -1,26 +1,18 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
 module Main where
 
 import Control.Applicative
-import Control.Monad (void)
-import Data.Coerce
 import Data.Foldable (asum)
 import Data.List (foldl')
 import qualified Data.HashMap.Strict as M
 import qualified Data.Text as T
-import Generic.Random (genericArbitrary, uniform)
-import GHC.Generics
-import System.Exit
 import Test.Hspec
 import qualified Test.Hspec.SmallCheck as SC
 import qualified Test.QuickCheck as QC
 import qualified Test.SmallCheck as SC
-import qualified Test.SmallCheck.Drivers as SC
 import qualified Test.SmallCheck.Series as SC
 
 import System.Metrics.Internal
@@ -42,6 +34,7 @@ tagSets = [M.singleton "k" "v", M.singleton "k" "w"]
 
 identifiers :: [Identifier]
 identifiers = Identifier <$> names <*> tagSets
+
 identifierGroups :: [[Identifier]]
 identifierGroups =
   [ []
