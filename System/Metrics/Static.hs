@@ -12,6 +12,13 @@
 -- This module wraps "System.Metrics" and presents an alternative
 -- interface where the types, names, and tags of metrics registered to a
 -- `Store` are statically known.
+--
+-- The functions presented in this interface are exactly the same as
+-- their counterparts in "System.Metrics", except that they have been
+-- restricted to work on only a narrow, user-defined set of inputs.
+--
+-- Note that some functions (namely, `registerGroup`) are not available
+-- from this interface.
 module System.Metrics.Static
   (
     -- * Static metric annotations
@@ -25,10 +32,14 @@ module System.Metrics.Static
     -- * Registering metrics
   , registerCounter
   , registerGauge
+  , registerLabel
+  , registerDistribution
 
     -- ** Convenience functions
   , createCounter
   , createGauge
+  , createLabel
+  , createDistribution
 
     -- ** Predefined metrics
   , registerGcMetrics
@@ -48,7 +59,9 @@ import GHC.Generics
 import GHC.TypeLits
 import qualified System.Metrics as Metrics
 import qualified System.Metrics.Counter as Counter
+import qualified System.Metrics.Distribution as Distribution
 import qualified System.Metrics.Gauge as Gauge
+import qualified System.Metrics.Label as Label
 
 ------------------------------------------------------------------------
 -- * Static metric annotations
@@ -57,6 +70,8 @@ import qualified System.Metrics.Gauge as Gauge
 data MetricType
   = Counter
   | Gauge
+  | Label
+  | Distribution
 
 ------------------------------------------------------------------------
 -- * Tags
@@ -213,7 +228,6 @@ instance GToTags (K1 i T.Text) where
 newtype Store (f :: MetricType -> Symbol -> * -> *) =
   Store Metrics.Store
 
--- | Create a new, empty metric store.
 newStore :: IO (Store f)
 newStore = Store <$> Metrics.newStore
 
@@ -244,6 +258,32 @@ registerGauge _ tags sample (Store store) =
       identifier = Metrics.Identifier name (toTags tags)
   in  Metrics.registerGauge identifier sample store
 
+registerLabel
+  :: forall f name tags. (KnownSymbol name, ToTags tags)
+  => f 'Label name tags
+  -> tags
+  -> IO T.Text
+  -> Store f
+  -> IO ()
+registerLabel _ tags sample (Store store) =
+  let name = T.pack $ symbolVal (Proxy @name)
+      identifier = Metrics.Identifier name (toTags tags)
+  in  Metrics.registerLabel identifier sample store
+
+registerDistribution
+  :: forall f name tags. (KnownSymbol name, ToTags tags)
+  => f 'Distribution name tags
+  -> tags
+  -> IO Distribution.Stats
+  -> Store f
+  -> IO ()
+registerDistribution _ tags sample (Store store) =
+  let name = T.pack $ symbolVal (Proxy @name)
+      identifier = Metrics.Identifier name (toTags tags)
+  in  Metrics.registerDistribution identifier sample store
+
+-- `registerGroup` is not supported
+
 ------------------------------------------------------------------------
 -- ** Convenience functions
 
@@ -268,6 +308,28 @@ createGauge _ tags (Store store) =
   let name = T.pack $ symbolVal (Proxy @name)
       identifier = Metrics.Identifier name (toTags tags)
   in  Metrics.createGauge identifier store
+
+createLabel
+  :: forall f name tags. (KnownSymbol name, ToTags tags)
+  => f 'Gauge name tags
+  -> tags
+  -> Store f
+  -> IO Label.Label
+createLabel _ tags (Store store) =
+  let name = T.pack $ symbolVal (Proxy @name)
+      identifier = Metrics.Identifier name (toTags tags)
+  in  Metrics.createLabel identifier store
+
+createDistribution
+  :: forall f name tags. (KnownSymbol name, ToTags tags)
+  => f 'Gauge name tags
+  -> tags
+  -> Store f
+  -> IO Distribution.Distribution
+createDistribution _ tags (Store store) =
+  let name = T.pack $ symbolVal (Proxy @name)
+      identifier = Metrics.Identifier name (toTags tags)
+  in  Metrics.createDistribution identifier store
 
 ------------------------------------------------------------------------
 -- ** Predefined metrics
