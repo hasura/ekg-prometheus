@@ -4,3 +4,7 @@ cradle:
       component: "lib:ekg-core"
     - path: "./test"
       component: "test:ekg-core-test"
+    - path: "./benchmarks"
+      component: "bench:counter"
+    - path: "./benchmarks"
+      component: "bench:distribution"
