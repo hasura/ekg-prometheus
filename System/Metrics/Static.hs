@@ -2,10 +2,11 @@
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- |
@@ -16,9 +17,6 @@
 -- The functions presented in this interface are exactly the same as
 -- their counterparts in "System.Metrics", except that they have been
 -- restricted to work on only a narrow, user-defined set of inputs.
---
--- Note that some functions (namely, `registerGroup`) are not available
--- from this interface.
 module System.Metrics.Static
   (
     -- * Static metric annotations
@@ -41,6 +39,10 @@ module System.Metrics.Static
   , createLabel
   , createDistribution
 
+    -- ** Registering groups of metrics
+  , GroupSampler (..)
+  , registerGroup
+
     -- ** Predefined metrics
   , registerGcMetrics
 
@@ -53,6 +55,7 @@ module System.Metrics.Static
 
 import qualified Data.HashMap.Strict as M
 import Data.Int (Int64)
+import Data.Kind (Type)
 import Data.Proxy
 import qualified Data.Text as T
 import GHC.Generics
@@ -225,7 +228,7 @@ instance GToTags (K1 i T.Text) where
 --      , idTags = fromList [("endpointLabel","dev/harpsichord")] }
 --    , Counter 5 )
 --  ]
-newtype Store (f :: MetricType -> Symbol -> * -> *) =
+newtype Store (f :: MetricType -> Symbol -> Type -> Type) =
   Store Metrics.Store
 
 newStore :: IO (Store f)
@@ -282,7 +285,70 @@ registerDistribution _ tags sample (Store store) =
       identifier = Metrics.Identifier name (toTags tags)
   in  Metrics.registerDistribution identifier sample store
 
--- `registerGroup` is not supported
+------------------------------------------------------------------------
+-- ** Registering groups of metrics
+
+type family MetricValue (t :: MetricType) :: Type where
+  MetricValue 'Counter = Int64
+  MetricValue 'Gauge = Int64
+  MetricValue 'Label = T.Text
+  MetricValue 'Distribution = Distribution.Stats
+
+class ToMetricValue (t :: MetricType) where
+  toMetricValue :: Proxy t -> MetricValue t -> Metrics.Value
+
+instance ToMetricValue 'Counter      where toMetricValue _ = Metrics.Counter
+instance ToMetricValue 'Gauge        where toMetricValue _ = Metrics.Gauge
+instance ToMetricValue 'Label        where toMetricValue _ = Metrics.Label
+instance ToMetricValue 'Distribution where toMetricValue _ = Metrics.Distribution
+
+
+infixl 0 :>
+data GroupSampler
+  :: (MetricType -> Symbol -> Type -> Type) -> Type -> [Type] -> Type
+  where
+  GroupSampler :: IO env -> GroupSampler metrics env '[]
+  (:>)
+    :: GroupSampler metrics env xs
+    ->  ( metrics metricType name tags
+        , tags
+        , env -> MetricValue metricType )
+    -> GroupSampler metrics env (metrics metricType name tags ': xs)
+
+
+class RegisterGroup (xs :: [Type]) where
+  registerGroup_
+    :: [(Metrics.Identifier, env -> Metrics.Value)]
+    -> GroupSampler metrics env xs
+    -> Store metrics
+    -> IO ()
+
+-- | Base case
+instance RegisterGroup '[] where
+  registerGroup_ getters (GroupSampler sampler) (Store store) =
+    Metrics.registerGroup (M.fromList getters) sampler store
+
+-- | Inductive case
+instance
+  ( RegisterGroup xs
+  , ToMetricValue metricType
+  , KnownSymbol name
+  , ToTags tags
+  ) => RegisterGroup (metrics metricType name tags ': xs)
+  where
+  registerGroup_ getters (groupSampler :> (_, tags, getter)) store =
+    let identifier = Metrics.Identifier
+          { Metrics.idName = T.pack $ symbolVal (Proxy @name)
+          , Metrics.idTags = toTags tags }
+        getter' =
+          ( identifier
+          , toMetricValue (Proxy @metricType) . getter )
+    in  registerGroup_ (getter' : getters) groupSampler store
+
+registerGroup
+  :: (RegisterGroup xs)
+  => GroupSampler metrics env xs -> Store metrics -> IO ()
+registerGroup = registerGroup_ []
 
 ------------------------------------------------------------------------
 -- ** Convenience functions
