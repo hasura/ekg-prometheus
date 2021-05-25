@@ -38,8 +38,10 @@ module System.Metrics
       -- * The metric store
       -- $metric-store
       Store
-    , Identifier (..)
     , newStore
+
+      -- * Identifying metrics
+    , Identifier (..)
 
       -- * Registering metrics
       -- $registering
@@ -373,6 +375,7 @@ sToMs s = round (s * 1000.0)
 -- @par_tot_bytes_copied@ divided by @par_max_bytes_copied@ approaches
 -- 1 for a maximally sequential run and approaches the number of
 -- threads (set by the RTS flag @-N@) for a maximally parallel run.
+--
 registerGcMetrics :: Store -> IO ()
 registerGcMetrics store =
     let taglessId :: T.Text -> Identifier
@@ -540,9 +543,12 @@ gcParTotBytesCopied = Stats.parAvgBytesCopied
 
 -- Documentation TODO
 
--- | Deregister all metrics (of any type) with the given name, ignoring
--- tags.
-deregisterByName :: T.Text -> Store -> IO ()
+-- | Deregister all metrics (of any type) with the given name, that is,
+-- irrespective of their tags.
+deregisterByName
+  :: T.Text -- ^ Metric name
+  -> Store -- ^ Metric store
+  -> IO ()
 deregisterByName name store =
     atomicModifyIORef' (storeState store) $ \state ->
         (Internal.deregisterByName name state, ())

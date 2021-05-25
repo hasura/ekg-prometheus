@@ -1,3 +1,4 @@
+{-# OPTIONS_HADDOCK hide #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE RankNTypes #-}
@@ -100,7 +101,7 @@ data GroupSampler = forall a. GroupSampler
         -- ^ Metric identifiers and getter functions.
      }
 
--- | The data used to identify a metric in the store.
+-- | The data used by the store to identify a metric.
 data Identifier = Identifier
     { idName :: T.Text
       -- ^ The name of the metric

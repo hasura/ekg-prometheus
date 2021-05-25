@@ -33,6 +33,7 @@ library
     Data.Array
     Data.Atomic
     System.Metrics.Static.Example
+    System.Metrics.Static.GroupExample
     System.Metrics.ThreadId
 
   build-depends:

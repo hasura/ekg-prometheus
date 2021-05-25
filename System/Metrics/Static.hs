@@ -21,6 +21,9 @@ module System.Metrics.Static
   (
     -- * Static metric annotations
     MetricType (..)
+  , MetricValue
+
+    -- ** Tags
   , ToTags (..)
 
     -- * The metric store
@@ -28,29 +31,36 @@ module System.Metrics.Static
   , newStore
 
     -- * Registering metrics
+    -- $registering
   , registerCounter
   , registerGauge
   , registerLabel
   , registerDistribution
 
+    -- ** Registering groups of metrics
+  , registerGroup
+  , SamplingGroup (..)
+
     -- ** Convenience functions
+    -- $convenience
   , createCounter
   , createGauge
   , createLabel
   , createDistribution
 
-    -- ** Registering groups of metrics
-  , GroupSampler (..)
-  , registerGroup
-
     -- ** Predefined metrics
+    -- $predefined
   , registerGcMetrics
 
     -- * Deregistering metrics
-  , deregisterByName
+  , deregisterClass
 
     -- * Sampling metrics
+    -- $sampling
   , sampleAll
+  , Metrics.Sample
+  , Metrics.Identifier (..)
+  , Metrics.Value (..)
   ) where
 
 import qualified Data.HashMap.Strict as M
@@ -69,20 +79,51 @@ import qualified System.Metrics.Label as Label
 ------------------------------------------------------------------------
 -- * Static metric annotations
 
--- | Types of metrics.
+-- | An enumeration of the types of metrics. To be used as types/kinds
+-- via -XDataKinds.
 data MetricType
-  = Counter
-  | Gauge
-  | Label
-  | Distribution
+  = CounterType
+  | GaugeType
+  | LabelType
+  | DistributionType
+
+-- | The type of value sampled by each metric.
+type family MetricValue (t :: MetricType) :: Type where
+  MetricValue 'CounterType = Int64
+  MetricValue 'GaugeType = Int64
+  MetricValue 'LabelType = T.Text
+  MetricValue 'DistributionType = Distribution.Stats
+
+-- | The `Metrics.Value` constructor for each metric.
+class ToMetricValue (t :: MetricType) where
+  toMetricValue :: Proxy t -> MetricValue t -> Metrics.Value
+
+instance ToMetricValue 'CounterType      where toMetricValue _ = Metrics.Counter
+instance ToMetricValue 'GaugeType        where toMetricValue _ = Metrics.Gauge
+instance ToMetricValue 'LabelType        where toMetricValue _ = Metrics.Label
+instance ToMetricValue 'DistributionType where toMetricValue _ = Metrics.Distribution
+
+-- | The default implementation of each metric.
+type family MetricsImpl (t :: MetricType) where
+  MetricsImpl 'CounterType = Counter.Counter
+  MetricsImpl 'GaugeType = Gauge.Gauge
+  MetricsImpl 'LabelType = Label.Label
+  MetricsImpl 'DistributionType = Distribution.Distribution
 
 ------------------------------------------------------------------------
--- * Tags
+-- ** Tags
 
--- | Types that can be converted to sets of key-value pairs.
+-- | Class of types that can be converted to sets of key-value pairs
+-- ("tags"), which are used to annotate metrics with additional
+-- information.
+--
+-- Each metric must be associated with a type from this class. The type
+-- determines the forms of tags that may be attached to the metric.
 --
 -- One may derive a `ToTags` instance for any record that exclusively
--- has fields of type `T.Text` via "GHC.Generics". For example:
+-- has fields of type `T.Text` via "GHC.Generics".
+--
+-- Example usage:
 --
 -- > {-# LANGUAGE DeriveGeneric #-}
 -- > {-# LANGUAGE OverloadedStrings #-}
@@ -105,19 +146,24 @@ class ToTags a where
 
   default toTags ::
     (Generic a, GToTags (Rep a)) => a -> M.HashMap T.Text T.Text
-  toTags x = gToTags "" (from x)
+  toTags x = gToTags undefined (from x)
   {-# INLINE toTags #-}
 
+-- | Disallow tags altogether.
 instance ToTags () where
   toTags () = M.empty
   {-# INLINE toTags #-}
 
-------------------------------------------------------------------------
--- * Deriving `ToTags`
---
--- Deriving instances of `ToTags` for records that exclusively have
--- fields of type `Text`.
+-- | Place no constraints on tags.
+instance ToTags (M.HashMap T.Text T.Text) where
+  toTags = id
+  {-# INLINE toTags #-}
 
+------------------------------------------------------------------------
+-- ** Deriving `ToTags`
+--
+-- | Deriving instances of `ToTags` for records that exclusively have
+-- fields of type `Text`.
 class GToTags (f :: * -> *) where
   gToTags :: T.Text -> f x -> M.HashMap T.Text T.Text
 
@@ -152,13 +198,15 @@ instance GToTags (K1 i T.Text) where
 ------------------------------------------------------------------------
 -- * The metric store
 
--- | A mutable metrics store, parameterized by a type @f@ whose values
--- @v@ represent the groups of metrics that may be registered to the
--- store.
+-- | A mutable metric store, parameterized by a type @metrics@ whose
+-- values @v@ represent the (classes of) metrics that may be registered
+-- to the store.
 --
--- The metrics of each group @v :: f metricType name tags@ have their
--- type, name, and tags determined by the type indices of @f@. For
--- example:
+-- The metrics of each class @v :: metrics metricType name tags@ have
+-- their type, name, and tags determined by the type indices of
+-- @metrics@.
+--
+-- Example usage:
 --
 -- > {-# LANGUAGE DataKinds #-}
 -- > {-# LANGUAGE DeriveGeneric #-}
@@ -170,6 +218,7 @@ instance GToTags (K1 i T.Text) where
 -- >   ( main
 -- >   ) where
 -- >
+-- > import Data.Kind (Type)
 -- > import qualified Data.Text as T
 -- > import GHC.Generics
 -- > import GHC.TypeLits
@@ -177,13 +226,13 @@ instance GToTags (K1 i T.Text) where
 -- > import qualified System.Metrics.Gauge as Gauge
 -- > import System.Metrics.Static
 -- >
--- > data MyMetrics (t :: MetricType) (name :: Symbol) (tags :: *) where
+-- > data MyMetrics (t :: MetricType) (name :: Symbol) (tags :: Type) where
 -- >   Requests ::
 -- >     MyMetrics 'Counter "requests" EndpointTags
 -- >   DBConnections ::
 -- >     MyMetrics 'Gauge "postgres.total_connections" DataSourceTags
 -- >
--- > newtype EndpointTags = EndpointTags { endpointLabel :: T.Text }
+-- > newtype EndpointTags = EndpointTags { endpoint :: T.Text }
 -- >   deriving (Generic)
 -- > instance ToTags EndpointTags
 -- >
@@ -210,6 +259,7 @@ instance GToTags (K1 i T.Text) where
 -- >   Counter.add harpsichordReqs 5
 -- >   Counter.add tablaReqs 10
 -- >   Gauge.set dbConnections 99
+-- >
 -- >   stats <- sampleAll store
 -- >   print stats
 --
@@ -217,7 +267,7 @@ instance GToTags (K1 i T.Text) where
 -- fromList
 --  [ ( Identifier
 --      { idName = "requests"
---      , idTags = fromList [("endpointLabel","dev/tabla")] }
+--      , idTags = fromList [("endpoint","dev/tabla")] }
 --    , Counter 10 )
 --  , ( Identifier
 --      { idName = "postgres.total_connections"
@@ -225,108 +275,188 @@ instance GToTags (K1 i T.Text) where
 --    , Gauge 99 )
 --  , ( Identifier
 --      { idName = "requests"
---      , idTags = fromList [("endpointLabel","dev/harpsichord")] }
+--      , idTags = fromList [("endpoint","dev/harpsichord")] }
 --    , Counter 5 )
 --  ]
-newtype Store (f :: MetricType -> Symbol -> Type -> Type) =
+newtype Store (metrics :: MetricType -> Symbol -> Type -> Type) =
   Store Metrics.Store
 
-newStore :: IO (Store f)
+-- | Create a new, empty metric store.
+newStore :: IO (Store metrics)
 newStore = Store <$> Metrics.newStore
 
 ------------------------------------------------------------------------
 -- * Registering metrics
 
+-- $registering
+-- Before metrics can be sampled they need to be registered with the
+-- metric store. Registering a metric with the same set of tags as an
+-- existing metric in the same class will first deregister the existing
+-- metric.
+
+-- | Register a non-negative, monotonically increasing, integer-valued
+-- metric. The provided action to read the value must be thread-safe.
+-- Also see 'createCounter'.
 registerCounter
-  :: forall f name tags. (KnownSymbol name, ToTags tags)
-  => f 'Counter name tags
-  -> tags
-  -> IO Int64
-  -> Store f
+  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
+  => metrics 'CounterType name tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> IO Int64 -- ^ Action to read the current metric value
+  -> Store metrics -- ^ Metric store
   -> IO ()
-registerCounter _ tags sample (Store store) =
-  let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name (toTags tags)
-  in  Metrics.registerCounter identifier sample store
+registerCounter = registerGeneric Metrics.registerCounter
 
+-- | Register an integer-valued metric. The provided action to read
+-- the value must be thread-safe. Also see 'createGauge'.
 registerGauge
-  :: forall f name tags. (KnownSymbol name, ToTags tags)
-  => f 'Gauge name tags
-  -> tags
-  -> IO Int64
-  -> Store f
+  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
+  => metrics 'GaugeType name tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> IO Int64 -- ^ Action to read the current metric value
+  -> Store metrics -- ^ Metric store
   -> IO ()
-registerGauge _ tags sample (Store store) =
-  let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name (toTags tags)
-  in  Metrics.registerGauge identifier sample store
+registerGauge = registerGeneric Metrics.registerGauge
 
+-- | Register a text metric. The provided action to read the value
+-- must be thread-safe. Also see 'createLabel'.
 registerLabel
-  :: forall f name tags. (KnownSymbol name, ToTags tags)
-  => f 'Label name tags
-  -> tags
-  -> IO T.Text
-  -> Store f
+  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
+  => metrics 'LabelType name tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> IO T.Text -- ^ Action to read the current metric value
+  -> Store metrics -- ^ Metric store
   -> IO ()
-registerLabel _ tags sample (Store store) =
-  let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name (toTags tags)
-  in  Metrics.registerLabel identifier sample store
+registerLabel = registerGeneric Metrics.registerLabel
 
+-- | Register a distribution metric. The provided action to read the
+-- value must be thread-safe. Also see 'createDistribution'.
 registerDistribution
-  :: forall f name tags. (KnownSymbol name, ToTags tags)
-  => f 'Distribution name tags
-  -> tags
-  -> IO Distribution.Stats
-  -> Store f
+  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
+  => metrics 'DistributionType name tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> IO Distribution.Stats -- ^ Action to read the current metric value
+  -> Store metrics -- ^ Metric store
   -> IO ()
-registerDistribution _ tags sample (Store store) =
+registerDistribution = registerGeneric Metrics.registerDistribution
+
+registerGeneric
+  :: forall metrics metricType name tags. (KnownSymbol name, ToTags tags)
+  => ( Metrics.Identifier
+      -> IO (MetricValue metricType)
+      -> Metrics.Store
+      -> IO ())
+  -> metrics metricType name tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> IO (MetricValue metricType) -- ^ Action to read the current metric value
+  -> Store metrics -- ^ Metric store
+  -> IO ()
+registerGeneric f _ tags sample (Store store) =
   let name = T.pack $ symbolVal (Proxy @name)
       identifier = Metrics.Identifier name (toTags tags)
-  in  Metrics.registerDistribution identifier sample store
+  in  f identifier sample store
 
 ------------------------------------------------------------------------
 -- ** Registering groups of metrics
 
-type family MetricValue (t :: MetricType) :: Type where
-  MetricValue 'Counter = Int64
-  MetricValue 'Gauge = Int64
-  MetricValue 'Label = T.Text
-  MetricValue 'Distribution = Distribution.Stats
+-- | Register an action that will be executed any time one of the
+-- metrics computed from the value it returns needs to be sampled.
+--
+-- When one or more of the metrics listed in the first argument needs
+-- to be sampled, the action is executed and the provided getter
+-- functions will be used to extract the metric(s) from the action's
+-- return value.
+--
+-- The registered action might be called from a different thread and
+-- therefore needs to be thread-safe.
+--
+-- This function allows you to sample groups of metrics together. This
+-- is useful if
+--
+-- * you need a consistent view of several metric or
+--
+-- * sampling the metrics together is more efficient.
+--
+-- For example, sampling GC statistics needs to be done atomically or
+-- a GC might strike in the middle of sampling, rendering the values
+-- incoherent. Sampling GC statistics is also more efficient if done
+-- in \"bulk\", as the run-time system provides a function to sample all
+-- GC statistics at once.
+--
+-- Note that sampling of the metrics is only atomic if the provided
+-- action computes @a@ atomically (e.g. if @a@ is a record, the action
+-- needs to compute its fields atomically if the sampling is to be
+-- atomic.)
+--
+-- Example usage:
+--
+-- > {-# LANGUAGE DataKinds #-}
+-- > {-# LANGUAGE GADTs #-}
+-- > {-# LANGUAGE KindSignatures #-}
+-- >
+-- > module System.Metrics.Static.GroupExample
+-- >   ( main
+-- >   ) where
+-- >
+-- > import Data.Kind (Type)
+-- > import GHC.Stats
+-- > import GHC.TypeLits
+-- > import System.Metrics.Static
+-- >
+-- > data RTSMetrics (t :: MetricType) (name :: Symbol) (tags :: Type) where
+-- >   Gcs :: RTSMetrics 'Counter "gcs" ()
+-- >   MaxLiveBytes :: RTSMetrics 'Gauge "max_live_bytes" ()
+-- >
+-- > main :: IO ()
+-- > main = do
+-- >   store <- newStore
+-- >   let samplingGroup =
+-- >         SamplingGroup
+-- >           :> (Gcs, (), fromIntegral . gcs)
+-- >           :> (MaxLiveBytes, (), fromIntegral . max_live_bytes)
+-- >   registerGroup samplingGroup getRTSStats store
+--
+registerGroup
+  :: (RegisterGroup xs)
+  => SamplingGroup metrics env xs -- ^ Metric identifiers and getter functions
+  -> IO env -- ^ Action to sample the metric group
+  -> Store metrics -- ^ Metric store
+  -> IO ()
+registerGroup = registerGroup_ []
 
-class ToMetricValue (t :: MetricType) where
-  toMetricValue :: Proxy t -> MetricValue t -> Metrics.Value
 
-instance ToMetricValue 'Counter      where toMetricValue _ = Metrics.Counter
-instance ToMetricValue 'Gauge        where toMetricValue _ = Metrics.Gauge
-instance ToMetricValue 'Label        where toMetricValue _ = Metrics.Label
-instance ToMetricValue 'Distribution where toMetricValue _ = Metrics.Distribution
-
-
-infixl 0 :>
-data GroupSampler
-  :: (MetricType -> Symbol -> Type -> Type) -> Type -> [Type] -> Type
+infixl 9 :>
+-- | A group of metrics derived from the same sample.
+data SamplingGroup
+  :: (MetricType -> Symbol -> Type -> Type)
+  -> Type
+  -> [Type]
+  -> Type
   where
-  GroupSampler :: IO env -> GroupSampler metrics env '[]
+  -- | The empty sampling group
+  SamplingGroup :: SamplingGroup metrics env '[]
+  -- | Add a metric to a sampling group
   (:>)
-    :: GroupSampler metrics env xs
+    :: SamplingGroup metrics env xs -- ^ Sampling group
     ->  ( metrics metricType name tags
         , tags
         , env -> MetricValue metricType )
-    -> GroupSampler metrics env (metrics metricType name tags ': xs)
+        -- ^ (Metric class, Tags, Getter function)
+    -> SamplingGroup metrics env (metrics metricType name tags ': xs)
 
 
+-- | Helper class for `registerGroup`.
 class RegisterGroup (xs :: [Type]) where
   registerGroup_
-    :: [(Metrics.Identifier, env -> Metrics.Value)]
-    -> GroupSampler metrics env xs
-    -> Store metrics
+    :: [(Metrics.Identifier, env -> Metrics.Value)] -- ^ Processed metrics
+    -> SamplingGroup metrics env xs -- ^ Metrics to be processed
+    -> IO env -- ^ Action to sample the metric group
+    -> Store metrics -- ^ Metric store
     -> IO ()
 
 -- | Base case
 instance RegisterGroup '[] where
-  registerGroup_ getters (GroupSampler sampler) (Store store) =
-    Metrics.registerGroup (M.fromList getters) sampler store
+  registerGroup_ getters SamplingGroup sample (Store store) =
+    Metrics.registerGroup (M.fromList getters) sample store
 
 -- | Inductive case
 instance
@@ -336,87 +466,182 @@ instance
   , ToTags tags
   ) => RegisterGroup (metrics metricType name tags ': xs)
   where
-  registerGroup_ getters (groupSampler :> (_, tags, getter)) store =
+  registerGroup_ getters (group :> (_, tags, getter)) sample store =
     let identifier = Metrics.Identifier
           { Metrics.idName = T.pack $ symbolVal (Proxy @name)
           , Metrics.idTags = toTags tags }
         getter' =
           ( identifier
           , toMetricValue (Proxy @metricType) . getter )
-    in  registerGroup_ (getter' : getters) groupSampler store
-
-registerGroup
-  :: (RegisterGroup xs)
-  => GroupSampler metrics env xs -> Store metrics -> IO ()
-registerGroup = registerGroup_ []
+    in  registerGroup_ (getter' : getters) group sample store
 
 ------------------------------------------------------------------------
 -- ** Convenience functions
 
+-- $convenience
+-- These functions combined the creation of a mutable reference (e.g.
+-- a `System.Metrics.Counter.Counter`) with registering that reference
+-- in the store in one convenient function.
+
+createGeneric
+  :: forall metrics metricType name tags. (KnownSymbol name, ToTags tags)
+  => (Metrics.Identifier -> Metrics.Store -> IO (MetricsImpl metricType))
+  -> metrics metricType name tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> Store metrics -- ^ Metric store
+  -> IO (MetricsImpl metricType)
+createGeneric f _ tags (Store store) =
+  let name = T.pack $ symbolVal (Proxy @name)
+      identifier = Metrics.Identifier name (toTags tags)
+  in  f identifier store
+
+-- | Create and register a zero-initialized counter.
 createCounter
-  :: forall f name tags. (KnownSymbol name, ToTags tags)
-  => f 'Counter name tags
-  -> tags
-  -> Store f
+  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
+  => metrics 'CounterType name tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> Store metrics -- ^ Metric store
   -> IO Counter.Counter
-createCounter _ tags (Store store) =
-  let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name (toTags tags)
-  in  Metrics.createCounter identifier store
+createCounter = createGeneric Metrics.createCounter
 
+-- | Create and register a zero-initialized gauge.
 createGauge
-  :: forall f name tags. (KnownSymbol name, ToTags tags)
-  => f 'Gauge name tags
-  -> tags
-  -> Store f
+  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
+  => metrics 'GaugeType name tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> Store metrics -- ^ Metric store
   -> IO Gauge.Gauge
-createGauge _ tags (Store store) =
-  let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name (toTags tags)
-  in  Metrics.createGauge identifier store
+createGauge = createGeneric Metrics.createGauge
 
+-- | Create and register an empty label.
 createLabel
-  :: forall f name tags. (KnownSymbol name, ToTags tags)
-  => f 'Gauge name tags
-  -> tags
-  -> Store f
+  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
+  => metrics 'LabelType name tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> Store metrics -- ^ Metric store
   -> IO Label.Label
-createLabel _ tags (Store store) =
-  let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name (toTags tags)
-  in  Metrics.createLabel identifier store
+createLabel = createGeneric Metrics.createLabel
 
+-- | Create and register an event tracker.
 createDistribution
-  :: forall f name tags. (KnownSymbol name, ToTags tags)
-  => f 'Gauge name tags
-  -> tags
-  -> Store f
+  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
+  => metrics 'DistributionType name tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> Store metrics -- ^ Metric store
   -> IO Distribution.Distribution
-createDistribution _ tags (Store store) =
-  let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name (toTags tags)
-  in  Metrics.createDistribution identifier store
+createDistribution = createGeneric Metrics.createDistribution
 
 ------------------------------------------------------------------------
 -- ** Predefined metrics
 
-registerGcMetrics :: Store f -> IO ()
+-- | Register a number of metrics related to garbage collector
+-- behavior.
+--
+-- To enable GC statistics collection, either run your program with
+--
+-- > +RTS -T
+--
+-- or compile it with
+--
+-- > -with-rtsopts=-T
+--
+-- The runtime overhead of @-T@ is very small so it's safe to always
+-- leave it enabled.
+--
+-- Registered counters:
+--
+-- [@rts.gc.bytes_allocated@] Total number of bytes allocated
+--
+-- [@rts.gc.num_gcs@] Number of garbage collections performed
+--
+-- [@rts.gc.num_bytes_usage_samples@] Number of byte usage samples taken
+--
+-- [@rts.gc.cumulative_bytes_used@] Sum of all byte usage samples, can be
+-- used with @numByteUsageSamples@ to calculate averages with
+-- arbitrary weighting (if you are sampling this record multiple
+-- times).
+--
+-- [@rts.gc.bytes_copied@] Number of bytes copied during GC
+--
+-- [@rts.gc.init_cpu_ms@] CPU time used by the init phase, in
+-- milliseconds. GHC 8.6+ only.
+--
+-- [@rts.gc.init_wall_ms@] Wall clock time spent running the init
+-- phase, in milliseconds. GHC 8.6+ only.
+--
+-- [@rts.gc.mutator_cpu_ms@] CPU time spent running mutator threads,
+-- in milliseconds. This does not include any profiling overhead or
+-- initialization.
+--
+-- [@rts.gc.mutator_wall_ms@] Wall clock time spent running mutator
+-- threads, in milliseconds. This does not include initialization.
+--
+-- [@rts.gc.gc_cpu_ms@] CPU time spent running GC, in milliseconds.
+--
+-- [@rts.gc.gc_wall_ms@] Wall clock time spent running GC, in
+-- milliseconds.
+--
+-- [@rts.gc.cpu_ms@] Total CPU time elapsed since program start, in
+-- milliseconds.
+--
+-- [@rts.gc.wall_ms@] Total wall clock time elapsed since start, in
+-- milliseconds.
+--
+-- Registered gauges:
+--
+-- [@rts.gc.max_bytes_used@] Maximum number of live bytes seen so far
+--
+-- [@rts.gc.current_bytes_used@] Current number of live bytes
+--
+-- [@rts.gc.current_bytes_slop@] Current number of bytes lost to slop
+--
+-- [@rts.gc.max_bytes_slop@] Maximum number of bytes lost to slop at any one time so far
+--
+-- [@rts.gc.peak_megabytes_allocated@] Maximum number of megabytes allocated
+--
+-- [@rts.gc.par_tot_bytes_copied@] Number of bytes copied during GC, minus
+-- space held by mutable lists held by the capabilities.  Can be used
+-- with 'parMaxBytesCopied' to determine how well parallel GC utilized
+-- all cores.
+--
+-- [@rts.gc.par_avg_bytes_copied@] Deprecated alias for
+-- @par_tot_bytes_copied@.
+--
+-- [@rts.gc.par_max_bytes_copied@] Sum of number of bytes copied each GC by
+-- the most active GC thread each GC. The ratio of
+-- @par_tot_bytes_copied@ divided by @par_max_bytes_copied@ approaches
+-- 1 for a maximally sequential run and approaches the number of
+-- threads (set by the RTS flag @-N@) for a maximally parallel run.
+--
+registerGcMetrics :: Store metrics -> IO ()
 registerGcMetrics (Store store) = Metrics.registerGcMetrics store
 
 ------------------------------------------------------------------------
 -- * Deregistering metrics
 
-deregisterByName
-  :: forall f metricType name tags. (KnownSymbol name)
-  => f metricType name tags
-  -> Store f
+-- | Deregister all metrics of the given class, irrespective of their
+-- tags.
+deregisterClass
+  :: forall metrics metricType name tags. (KnownSymbol name)
+  => metrics metricType name tags -- ^ Metric class
+  -> Store metrics -- ^ Metric store
   -> IO ()
-deregisterByName _ (Store store) =
+deregisterClass _ (Store store) =
   let name = T.pack $ symbolVal (Proxy @name)
   in  Metrics.deregisterByName name store
 
 ------------------------------------------------------------------------
 -- * Sampling metrics
 
-sampleAll :: Store f -> IO Metrics.Sample
+-- $sampling
+-- The metrics register in the store can be sampled together. Sampling
+-- is /not/ atomic. While each metric will be retrieved atomically,
+-- the sample is not an atomic snapshot of the system as a whole. See
+-- 'registerGroup' for an explanation of how to sample a subset of all
+-- metrics atomically.
+
+-- | Sample all metrics. Sampling is /not/ atomic in the sense that
+-- some metrics might have been mutated before they're sampled but
+-- after some other metrics have already been sampled.
+sampleAll :: Store metrics -> IO Metrics.Sample
 sampleAll (Store store) = Metrics.sampleAll store

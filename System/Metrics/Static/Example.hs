@@ -8,6 +8,7 @@ module System.Metrics.Static.Example
   ( main
   ) where
 
+import Data.Kind (Type)
 import qualified Data.Text as T
 import GHC.Generics
 import GHC.TypeLits
@@ -15,13 +16,13 @@ import qualified System.Metrics.Counter as Counter
 import qualified System.Metrics.Gauge as Gauge
 import System.Metrics.Static
 
-data MyMetrics (t :: MetricType) (name :: Symbol) (tags :: *) where
+data MyMetrics (t :: MetricType) (name :: Symbol) (tags :: Type) where
   Requests ::
-    MyMetrics 'Counter "requests" EndpointTags
+    MyMetrics 'CounterType "requests" EndpointTags
   DBConnections ::
-    MyMetrics 'Gauge "postgres.total_connections" DataSourceTags
+    MyMetrics 'GaugeType "postgres.total_connections" DataSourceTags
 
-newtype EndpointTags = EndpointTags { endpointLabel :: T.Text }
+newtype EndpointTags = EndpointTags { endpoint :: T.Text }
   deriving (Generic)
 instance ToTags EndpointTags
 
@@ -48,5 +49,6 @@ main = do
   Counter.add harpsichordReqs 5
   Counter.add tablaReqs 10
   Gauge.set dbConnections 99
+
   stats <- sampleAll store
   print stats
