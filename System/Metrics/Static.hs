@@ -1,9 +1,11 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -11,8 +13,8 @@
 
 -- |
 -- This module wraps "System.Metrics" and presents an alternative
--- interface where the types, names, and tags of metrics registered to a
--- `Store` are statically known.
+-- interface where the types, names, and (the forms of) tags of metrics
+-- registered to a `Store` are statically known.
 --
 -- The functions presented in this interface are exactly the same as
 -- their counterparts in "System.Metrics", except that they have been
@@ -29,6 +31,14 @@ module System.Metrics.Static
     -- * The metric store
   , Store
   , newStore
+
+    -- * Scopes
+    -- $scopes
+  , restricted
+  , AllMetrics (..)
+  , subset
+  , EmptyMetrics
+  , emptySubset
 
     -- * Registering metrics
     -- $registering
@@ -63,6 +73,7 @@ module System.Metrics.Static
   , Metrics.Value (..)
   ) where
 
+import Data.Coerce (coerce)
 import qualified Data.HashMap.Strict as M
 import Data.Int (Int64)
 import Data.Kind (Type)
@@ -203,8 +214,8 @@ instance GToTags (K1 i T.Text) where
 -- to the store.
 --
 -- The metrics of each class @v :: metrics metricType name tags@ have
--- their type, name, and tags determined by the type indices of
--- @metrics@.
+-- their type, name, and (the form of) their tags determined by the type
+-- indices of @metrics@.
 --
 -- Example usage:
 --
@@ -284,6 +295,61 @@ newtype Store (metrics :: MetricType -> Symbol -> Type -> Type) =
 -- | Create a new, empty metric store.
 newStore :: IO (Store metrics)
 newStore = Store <$> Metrics.newStore
+
+------------------------------------------------------------------------
+-- * Scopes
+
+-- $scopes
+-- One can view the type parameter of a metric store as its /scope/:
+-- the type parameter specifies which metrics the store knows about and,
+-- thereby, which it can act upon.
+--
+-- It may be useful to create a reference to a metrics store that is
+-- scoped to a subset of its metrics. This can be done if the subset can
+-- be represented by a function @f :: metricsSubset metricType name tags
+-- -> metrics metricType name tags@.
+
+-- | Create a reference to an existing metric store with restricted
+-- scope.
+restricted
+  :: (forall metricType name tags.
+      metricsSubset metricType name tags -> metrics metricType name tags)
+    -- ^ Embedding function
+  -> Store metrics -- ^ Metrics store
+  -> Store metricsSubset
+restricted _ = coerce
+
+-- | The largest scope. All scopes can be embedded in this scope via the
+-- `subset` function.
+--
+-- Metrics of any form may be registered to a store of type `AllMetrics`
+-- using the `Metric` constructor. For example:
+--
+-- > example :: Store AllMetrics -> IO Counter.Counter
+-- > example = createCounter (Metric @_ @"total_requests") ()
+--
+data AllMetrics :: MetricType -> Symbol -> Type -> Type where
+  Metric :: AllMetrics metricType name tags
+
+_exampleAllMetrics :: Store AllMetrics -> IO Counter.Counter
+_exampleAllMetrics = createCounter (Metric @_ @"total_requests") ()
+
+-- | All scopes can be embedded in the largest scope.
+subset
+  :: metrics metricType name tags -> AllMetrics metricType name tags
+subset _ = Metric
+
+-- | The smallest scope. This scope can be embedded in any scope via the
+-- `emptySubset` function.
+--
+-- The only operation available to a store with scope @`EmptyMetrics`@
+-- is `sampleAll`.
+data EmptyMetrics :: MetricType -> Symbol -> Type -> Type where
+
+-- | The smallest scope can be embedded in any scope.
+emptySubset
+  :: EmptyMetrics metricType name tags -> metrics metricType name tags
+emptySubset metrics = case metrics of {}
 
 ------------------------------------------------------------------------
 -- * Registering metrics
@@ -613,7 +679,7 @@ createDistribution = createGeneric Metrics.createDistribution
 -- 1 for a maximally sequential run and approaches the number of
 -- threads (set by the RTS flag @-N@) for a maximally parallel run.
 --
-registerGcMetrics :: Store metrics -> IO ()
+registerGcMetrics :: Store AllMetrics -> IO ()
 registerGcMetrics (Store store) = Metrics.registerGcMetrics store
 
 ------------------------------------------------------------------------
