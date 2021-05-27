@@ -16,11 +16,11 @@ import qualified System.Metrics.Counter as Counter
 import qualified System.Metrics.Gauge as Gauge
 import System.Metrics.Static
 
-data MyMetrics (t :: MetricType) (name :: Symbol) (tags :: Type) where
+data MyMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
   Requests ::
-    MyMetrics 'CounterType "requests" EndpointTags
+    MyMetrics "requests" 'CounterType EndpointTags
   DBConnections ::
-    MyMetrics 'GaugeType "postgres.total_connections" DataSourceTags
+    MyMetrics "postgres.total_connections" 'GaugeType DataSourceTags
 
 newtype EndpointTags = EndpointTags { endpoint :: T.Text }
   deriving (Generic)

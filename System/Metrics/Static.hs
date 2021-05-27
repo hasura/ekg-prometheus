@@ -213,7 +213,7 @@ instance GToTags (K1 i T.Text) where
 -- values @v@ represent the (classes of) metrics that may be registered
 -- to the store.
 --
--- The metrics of each class @v :: metrics metricType name tags@ have
+-- The metrics of each class @v :: metrics name metricType tags@ have
 -- their type, name, and (the form of) their tags determined by the type
 -- indices of @metrics@.
 --
@@ -225,7 +225,7 @@ instance GToTags (K1 i T.Text) where
 -- > {-# LANGUAGE KindSignatures #-}
 -- > {-# LANGUAGE OverloadedStrings #-}
 -- >
--- > module Main
+-- > module System.Metrics.Static.Example
 -- >   ( main
 -- >   ) where
 -- >
@@ -237,11 +237,11 @@ instance GToTags (K1 i T.Text) where
 -- > import qualified System.Metrics.Gauge as Gauge
 -- > import System.Metrics.Static
 -- >
--- > data MyMetrics (t :: MetricType) (name :: Symbol) (tags :: Type) where
+-- > data MyMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
 -- >   Requests ::
--- >     MyMetrics 'Counter "requests" EndpointTags
+-- >     MyMetrics "requests" 'CounterType EndpointTags
 -- >   DBConnections ::
--- >     MyMetrics 'Gauge "postgres.total_connections" DataSourceTags
+-- >     MyMetrics "postgres.total_connections" 'GaugeType DataSourceTags
 -- >
 -- > newtype EndpointTags = EndpointTags { endpoint :: T.Text }
 -- >   deriving (Generic)
@@ -289,7 +289,7 @@ instance GToTags (K1 i T.Text) where
 --      , idTags = fromList [("endpoint","dev/harpsichord")] }
 --    , Counter 5 )
 --  ]
-newtype Store (metrics :: MetricType -> Symbol -> Type -> Type) =
+newtype Store (metrics :: Symbol -> MetricType -> Type -> Type) =
   Store Metrics.Store
 
 -- | Create a new, empty metric store.
@@ -306,14 +306,14 @@ newStore = Store <$> Metrics.newStore
 --
 -- It may be useful to create a reference to a metrics store that is
 -- scoped to a subset of its metrics. This can be done if the subset can
--- be represented by a function @f :: metricsSubset metricType name tags
--- -> metrics metricType name tags@.
+-- be represented by a function @f :: metricsSubset name metricType tags
+-- -> metrics name metricType tags@.
 
 -- | Create a reference to an existing metric store with restricted
 -- scope.
 restricted
-  :: (forall metricType name tags.
-      metricsSubset metricType name tags -> metrics metricType name tags)
+  :: (forall name metricType tags.
+      metricsSubset name metricType tags -> metrics name metricType tags)
     -- ^ Embedding function
   -> Store metrics -- ^ Metrics store
   -> Store metricsSubset
@@ -326,17 +326,17 @@ restricted _ = coerce
 -- using the `Metric` constructor. For example:
 --
 -- > example :: Store AllMetrics -> IO Counter.Counter
--- > example = createCounter (Metric @_ @"total_requests") ()
+-- > example = createCounter (Metrics @"total_requests") ()
 --
-data AllMetrics :: MetricType -> Symbol -> Type -> Type where
-  Metric :: AllMetrics metricType name tags
+data AllMetrics :: Symbol -> MetricType -> Type -> Type where
+  Metric :: AllMetrics name metricType tags
 
 _exampleAllMetrics :: Store AllMetrics -> IO Counter.Counter
-_exampleAllMetrics = createCounter (Metric @_ @"total_requests") ()
+_exampleAllMetrics = createCounter (Metric @"total_requests") ()
 
 -- | All scopes can be embedded in the largest scope.
 subset
-  :: metrics metricType name tags -> AllMetrics metricType name tags
+  :: metrics name metricType tags -> AllMetrics name metricType tags
 subset _ = Metric
 
 -- | The smallest scope. This scope can be embedded in any scope via the
@@ -344,11 +344,11 @@ subset _ = Metric
 --
 -- The only operation available to a store with scope @`EmptyMetrics`@
 -- is `sampleAll`.
-data EmptyMetrics :: MetricType -> Symbol -> Type -> Type where
+data EmptyMetrics :: Symbol -> MetricType -> Type -> Type where
 
 -- | The smallest scope can be embedded in any scope.
 emptySubset
-  :: EmptyMetrics metricType name tags -> metrics metricType name tags
+  :: EmptyMetrics name metricType tags -> metrics name metricType tags
 emptySubset metrics = case metrics of {}
 
 ------------------------------------------------------------------------
@@ -365,7 +365,7 @@ emptySubset metrics = case metrics of {}
 -- Also see 'createCounter'.
 registerCounter
   :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics 'CounterType name tags -- ^ Metric class
+  => metrics name 'CounterType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO Int64 -- ^ Action to read the current metric value
   -> Store metrics -- ^ Metric store
@@ -376,7 +376,7 @@ registerCounter = registerGeneric Metrics.registerCounter
 -- the value must be thread-safe. Also see 'createGauge'.
 registerGauge
   :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics 'GaugeType name tags -- ^ Metric class
+  => metrics name 'GaugeType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO Int64 -- ^ Action to read the current metric value
   -> Store metrics -- ^ Metric store
@@ -387,7 +387,7 @@ registerGauge = registerGeneric Metrics.registerGauge
 -- must be thread-safe. Also see 'createLabel'.
 registerLabel
   :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics 'LabelType name tags -- ^ Metric class
+  => metrics name 'LabelType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO T.Text -- ^ Action to read the current metric value
   -> Store metrics -- ^ Metric store
@@ -398,7 +398,7 @@ registerLabel = registerGeneric Metrics.registerLabel
 -- value must be thread-safe. Also see 'createDistribution'.
 registerDistribution
   :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics 'DistributionType name tags -- ^ Metric class
+  => metrics name 'DistributionType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO Distribution.Stats -- ^ Action to read the current metric value
   -> Store metrics -- ^ Metric store
@@ -406,12 +406,12 @@ registerDistribution
 registerDistribution = registerGeneric Metrics.registerDistribution
 
 registerGeneric
-  :: forall metrics metricType name tags. (KnownSymbol name, ToTags tags)
+  :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
   => ( Metrics.Identifier
       -> IO (MetricValue metricType)
       -> Metrics.Store
       -> IO ())
-  -> metrics metricType name tags -- ^ Metric class
+  -> metrics name metricType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO (MetricValue metricType) -- ^ Action to read the current metric value
   -> Store metrics -- ^ Metric store
@@ -468,9 +468,9 @@ registerGeneric f _ tags sample (Store store) =
 -- > import GHC.TypeLits
 -- > import System.Metrics.Static
 -- >
--- > data RTSMetrics (t :: MetricType) (name :: Symbol) (tags :: Type) where
--- >   Gcs :: RTSMetrics 'Counter "gcs" ()
--- >   MaxLiveBytes :: RTSMetrics 'Gauge "max_live_bytes" ()
+-- > data RTSMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
+-- >   Gcs :: RTSMetrics "gcs" 'CounterType ()
+-- >   MaxLiveBytes :: RTSMetrics "max_live_bytes" 'GaugeType ()
 -- >
 -- > main :: IO ()
 -- > main = do
@@ -493,7 +493,7 @@ registerGroup = registerGroup_ []
 infixl 9 :>
 -- | A group of metrics derived from the same sample.
 data SamplingGroup
-  :: (MetricType -> Symbol -> Type -> Type)
+  :: (Symbol -> MetricType -> Type -> Type)
   -> Type
   -> [Type]
   -> Type
@@ -503,11 +503,11 @@ data SamplingGroup
   -- | Add a metric to a sampling group
   (:>)
     :: SamplingGroup metrics env xs -- ^ Sampling group
-    ->  ( metrics metricType name tags
+    ->  ( metrics name metricType tags
         , tags
         , env -> MetricValue metricType )
         -- ^ (Metric class, Tags, Getter function)
-    -> SamplingGroup metrics env (metrics metricType name tags ': xs)
+    -> SamplingGroup metrics env (metrics name metricType tags ': xs)
 
 
 -- | Helper class for `registerGroup`.
@@ -530,7 +530,7 @@ instance
   , ToMetricValue metricType
   , KnownSymbol name
   , ToTags tags
-  ) => RegisterGroup (metrics metricType name tags ': xs)
+  ) => RegisterGroup (metrics name metricType tags ': xs)
   where
   registerGroup_ getters (group :> (_, tags, getter)) sample store =
     let identifier = Metrics.Identifier
@@ -550,9 +550,9 @@ instance
 -- in the store in one convenient function.
 
 createGeneric
-  :: forall metrics metricType name tags. (KnownSymbol name, ToTags tags)
+  :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
   => (Metrics.Identifier -> Metrics.Store -> IO (MetricsImpl metricType))
-  -> metrics metricType name tags -- ^ Metric class
+  -> metrics name metricType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO (MetricsImpl metricType)
@@ -564,7 +564,7 @@ createGeneric f _ tags (Store store) =
 -- | Create and register a zero-initialized counter.
 createCounter
   :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics 'CounterType name tags -- ^ Metric class
+  => metrics name 'CounterType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO Counter.Counter
@@ -573,7 +573,7 @@ createCounter = createGeneric Metrics.createCounter
 -- | Create and register a zero-initialized gauge.
 createGauge
   :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics 'GaugeType name tags -- ^ Metric class
+  => metrics name 'GaugeType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO Gauge.Gauge
@@ -582,7 +582,7 @@ createGauge = createGeneric Metrics.createGauge
 -- | Create and register an empty label.
 createLabel
   :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics 'LabelType name tags -- ^ Metric class
+  => metrics name 'LabelType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO Label.Label
@@ -591,7 +591,7 @@ createLabel = createGeneric Metrics.createLabel
 -- | Create and register an event tracker.
 createDistribution
   :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics 'DistributionType name tags -- ^ Metric class
+  => metrics name 'DistributionType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO Distribution.Distribution
@@ -688,8 +688,8 @@ registerGcMetrics (Store store) = Metrics.registerGcMetrics store
 -- | Deregister all metrics of the given class, irrespective of their
 -- tags.
 deregisterClass
-  :: forall metrics metricType name tags. (KnownSymbol name)
-  => metrics metricType name tags -- ^ Metric class
+  :: forall metrics name metricType tags. (KnownSymbol name)
+  => metrics name metricType tags -- ^ Metric class
   -> Store metrics -- ^ Metric store
   -> IO ()
 deregisterClass _ (Store store) =
