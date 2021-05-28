@@ -63,6 +63,7 @@ module System.Metrics.Static
   , registerGcMetrics
 
     -- * Deregistering metrics
+  , deregister
   , deregisterClass
 
     -- * Sampling metrics
@@ -684,6 +685,19 @@ registerGcMetrics (Store store) = Metrics.registerGcMetrics store
 
 ------------------------------------------------------------------------
 -- * Deregistering metrics
+
+-- | Deregister a metric of the given class with the given tag set.
+deregister
+  :: forall metrics name metricType tags.
+      (KnownSymbol name, ToTags tags)
+  => metrics name metricType tags -- ^ Metric class
+  -> tags
+  -> Store metrics -- ^ Metric store
+  -> IO ()
+deregister _ tags (Store store) =
+  let name = T.pack $ symbolVal (Proxy @name)
+      identifier = Metrics.Identifier name (toTags tags)
+  in  Metrics.deregister identifier store
 
 -- | Deregister all metrics of the given class, irrespective of their
 -- tags.

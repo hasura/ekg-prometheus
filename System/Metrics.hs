@@ -63,6 +63,7 @@ module System.Metrics
     , registerGcMetrics
 
       -- * Deregistering metrics
+    , deregister
     , deregisterByName
 
       -- * Sampling metrics
@@ -87,7 +88,7 @@ import qualified System.Metrics.Distribution as Distribution
 import System.Metrics.Gauge (Gauge)
 import qualified System.Metrics.Gauge as Gauge
 import System.Metrics.Internal
-  hiding (deregisterByName, register, registerGroup, sampleAll)
+  hiding (deregister, deregisterByName, register, registerGroup, sampleAll)
 import qualified System.Metrics.Internal as Internal
 import System.Metrics.Label (Label)
 import qualified System.Metrics.Label as Label
@@ -542,6 +543,15 @@ gcParTotBytesCopied = Stats.parAvgBytesCopied
 -- * Deregistering metrics
 
 -- Documentation TODO
+
+-- | Deregister a metric (of any type).
+deregister
+  :: Identifier -- ^ Metric identifier
+  -> Store -- ^ Metric store
+  -> IO ()
+deregister identifier store =
+    atomicModifyIORef' (storeState store) $ \state ->
+        (Internal.deregister identifier state, ())
 
 -- | Deregister all metrics (of any type) with the given name, that is,
 -- irrespective of their tags.
