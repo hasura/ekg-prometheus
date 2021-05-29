@@ -25,7 +25,7 @@ import qualified Prelude
 import Prelude hiding (max, min, read, sum)
 
 import Control.Exception (assert)
-import Control.Monad (forM_, replicateM)
+import Control.Monad (forM_, replicateM, when)
 import qualified Data.Array as A
 import Data.Primitive.ByteArray
 import Data.Primitive.MachDeps (sIZEOF_INT)
@@ -113,7 +113,7 @@ spinlock arr# s0# =
 unlock :: Distrib -> IO ()
 unlock (Distrib arr) = writeByteArray @Int arr posLock 0
 
--- Mean and variance are computed according to
+-- | Mean and variance are computed according to
 -- http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
 distribAddN :: Distrib -> Double -> Int64 -> IO ()
 distribAddN distrib val n = do
@@ -145,6 +145,8 @@ distribAddN distrib val n = do
     writeByteArray @Double arr posMin newMin
     writeByteArray @Double arr posMax newMax
 
+-- | Adds the data of the left distribution to that of the right
+-- distribution using
 -- http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
 distribCombine :: Distrib -> Distrib -> IO ()
 distribCombine distrib (Distrib accArr) =
@@ -152,37 +154,39 @@ distribCombine distrib (Distrib accArr) =
     let Distrib arr = distrib
 
     count <- readByteArray @Int64 arr posCount
-    mean <- readByteArray @Double arr posMean
-    sumSqDelta <- readByteArray @Double arr posSumSqDelta
-    sum <- readByteArray @Double arr posSum
-    min <- readByteArray @Double arr posMin
-    max <- readByteArray @Double arr posMax
 
-    accCount <- readByteArray @Int64 accArr posCount
-    accMean <- readByteArray @Double accArr posMean
-    accSumSqDelta <- readByteArray @Double accArr posSumSqDelta
-    accSum <- readByteArray @Double accArr posSum
-    accMin <- readByteArray @Double accArr posMin
-    accMax <- readByteArray @Double accArr posMax
+    when (count > 0) $ do
+      mean <- readByteArray @Double arr posMean
+      sumSqDelta <- readByteArray @Double arr posSumSqDelta
+      sum <- readByteArray @Double arr posSum
+      min <- readByteArray @Double arr posMin
+      max <- readByteArray @Double arr posMax
 
-    let newCount = count + accCount
-        delta = mean - accMean
-        count' = fromIntegral count
-        countAcc' = fromIntegral accCount
-        newCount' = fromIntegral newCount
-        newMean = (countAcc' * accMean + count' * mean) / newCount'
-        newSumSqDelta = accSumSqDelta + sumSqDelta +
-          delta * delta * (countAcc' * count') / newCount'
-        newSum = sum + accSum
-        newMin = Prelude.min min accMin
-        newMax = Prelude.max max accMax
+      accCount <- readByteArray @Int64 accArr posCount
+      accMean <- readByteArray @Double accArr posMean
+      accSumSqDelta <- readByteArray @Double accArr posSumSqDelta
+      accSum <- readByteArray @Double accArr posSum
+      accMin <- readByteArray @Double accArr posMin
+      accMax <- readByteArray @Double accArr posMax
 
-    writeByteArray @Int64 accArr posCount newCount
-    writeByteArray @Double accArr posMean newMean
-    writeByteArray @Double accArr posSumSqDelta newSumSqDelta
-    writeByteArray @Double accArr posSum newSum
-    writeByteArray @Double accArr posMin newMin
-    writeByteArray @Double accArr posMax newMax
+      let newCount = count + accCount
+          delta = mean - accMean
+          count' = fromIntegral count
+          countAcc' = fromIntegral accCount
+          newCount' = fromIntegral newCount
+          newMean = (countAcc' * accMean + count' * mean) / newCount'
+          newSumSqDelta = accSumSqDelta + sumSqDelta +
+            delta * delta * (countAcc' * count') / newCount'
+          newSum = sum + accSum
+          newMin = Prelude.min min accMin
+          newMax = Prelude.max max accMax
+
+      writeByteArray @Int64 accArr posCount newCount
+      writeByteArray @Double accArr posMean newMean
+      writeByteArray @Double accArr posSumSqDelta newSumSqDelta
+      writeByteArray @Double accArr posSum newSum
+      writeByteArray @Double accArr posMin newMin
+      writeByteArray @Double accArr posMax newMax
 
 ------------------------------------------------------------------------
 -- Exposed API
