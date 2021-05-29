@@ -130,9 +130,11 @@ distribAddN distrib val n = do
 
     let newCount = oldCount + n
         delta = val - oldMean
-        newMean = oldMean + n' * delta / fromIntegral newCount
-        newSumSqDelta = oldSumSqDelta + delta * (val - newMean) * n'
-        newSum = oldSum + val -- Shouldn't this be `oldSum + n'*val`?
+        newCount' = fromIntegral newCount
+        newMean = oldMean + n' * delta / newCount'
+        newSumSqDelta = oldSumSqDelta +
+          delta * delta * (n' * fromIntegral oldCount) / newCount'
+        newSum = oldSum + n' * val
         newMin = Prelude.min oldMin val
         newMax = Prelude.max oldMax val
 
