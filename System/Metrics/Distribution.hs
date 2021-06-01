@@ -1,11 +1,16 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UnboxedTuples #-}
 
 module System.Metrics.Distribution
-    ( Distribution
+    (
+      -- * Warning
+      -- $warning
+
+      -- * Distributions
+      Distribution
     , new
     , add
     , addN
@@ -29,12 +34,23 @@ import Control.Monad (forM_, replicateM, when)
 import qualified Data.Array as A
 import Data.Primitive.ByteArray
 import Data.Primitive.MachDeps (sIZEOF_INT)
+import Data.Primitive.Types
+import GHC.Float
 import GHC.Int
 import GHC.IO
 import GHC.Prim
+import Test.Inspection
 
 import qualified System.Metrics.Distribution.Internal as Internal
 import System.Metrics.ThreadId
+
+------------------------------------------------------------------------
+-- * Warning
+
+-- $warning
+-- Warning: On 32-bit platforms, this implementation may only receive up
+-- to 2^31 values. Adding a number of values beyond this limit may
+-- result in nonsensical results.
 
 ------------------------------------------------------------------------
 
@@ -71,9 +87,17 @@ posSumSqDelta = 3 -- Double
 posSum = 4 -- Double
 posMin = 5 -- Double
 posMax = 6 -- Double
+{-# INLINE posLock #-}
+{-# INLINE posCount #-}
+{-# INLINE posMean #-}
+{-# INLINE posSumSqDelta #-}
+{-# INLINE posSum #-}
+{-# INLINE posMin #-}
+{-# INLINE posMax #-}
 
 newDistrib :: IO Distrib
 newDistrib = do
+    -- We pad to 64 bytes (an x86 cache line) to try to avoid false sharing.
     arr <- newAlignedPinnedByteArray sIZEOF_CACHELINE sIZEOF_CACHELINE
 
     writeByteArray @Int    arr posLock        0
@@ -89,106 +113,183 @@ newDistrib = do
     inf :: Double
     inf = 1/0
 
-withLock :: Distrib -> IO () -> IO ()
-withLock distrib action = mask_ $ do
-  lock distrib
-  action
-  unlock distrib
-
-lock :: Distrib -> IO ()
-lock (Distrib (MutableByteArray arr#)) = IO $ \s0# ->
-  case spinlock arr# s0# of
-    s1# -> (# s1#, () #)
-
-spinlock
+spinlock#
   :: MutableByteArray# RealWorld -> State# RealWorld -> State# RealWorld
-spinlock arr# s0# =
-  case posLock of { I# posLock# ->
-  case casIntArray# arr# posLock# 0# 1# s0# of { (# s1#, r# #) ->
-  case r# of
-    0# -> s1#
-    _ -> spinlock arr# s1#
+spinlock# arr s0 =
+  case posLock of { I# posLock' ->
+  case casIntArray# arr posLock' 0# 1# s0 of { (# s1, r #) ->
+  case r of
+    0# -> s1
+    _ -> spinlock# arr s1
   }}
 
-unlock :: Distrib -> IO ()
-unlock (Distrib arr) = writeByteArray @Int arr posLock 0
+unlock# :: MutableByteArray# RealWorld -> State# RealWorld -> State# RealWorld
+unlock# arr s0 =
+  case posLock of { I# posLock' ->
+  case writeIntArray# arr posLock' 0# s0 of { s1 ->
+  s1
+  }}
 
 -- | Mean and variance are computed according to
 -- http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
-distribAddN :: Distrib -> Double -> Int64 -> IO ()
-distribAddN distrib val n = do
-  let n' = fromIntegral n :: Double
-  withLock distrib $ do
-    let Distrib arr = distrib
+distribAddN :: Distrib -> Double -> Int -> IO ()
+distribAddN (Distrib (MutableByteArray arr)) valBox nBox = IO $ \s0 ->
+  case nBox of { I# n ->
+  case valBox of { D# val ->
+  case distribAddN# arr val n s0 of { s1 ->
+  (# s1, () #)
+  }}}
 
-    oldCount <- readByteArray @Int64 arr posCount
-    oldMean <- readByteArray @Double arr posMean
-    oldSumSqDelta <- readByteArray @Double arr posSumSqDelta
-    oldSum <- readByteArray @Double arr posSum
-    oldMin <- readByteArray @Double arr posMin
-    oldMax <- readByteArray @Double arr posMax
+-- | Mean and variance are computed according to
+-- http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
+distribAddN#
+  :: MutableByteArray# RealWorld
+  -> Double#
+  -> Int#
+  -> State# RealWorld
+  -> State# RealWorld
+distribAddN# arr val n s0 =
+  -- Get data positions
+  case posCount of { I# posCount' ->
+  case posMean of { I# posMean' ->
+  case posSumSqDelta of { I# posSumSqDelta' ->
+  case posSum of { I# posSum' ->
+  case posMin of { I# posMin' ->
+  case posMax of { I# posMax' ->
 
-    let newCount = oldCount + n
-        delta = val - oldMean
-        newCount' = fromIntegral newCount
-        newMean = oldMean + n' * delta / newCount'
-        newSumSqDelta = oldSumSqDelta +
-          delta * delta * (n' * fromIntegral oldCount) / newCount'
-        newSum = oldSum + n' * val
-        newMin = Prelude.min oldMin val
-        newMax = Prelude.max oldMax val
+  -- Convert `n` to Double
+  case int2Double# n of { n' ->
 
-    writeByteArray @Int64 arr posCount newCount
-    writeByteArray @Double arr posMean newMean
-    writeByteArray @Double arr posSumSqDelta newSumSqDelta
-    writeByteArray @Double arr posSum newSum
-    writeByteArray @Double arr posMin newMin
-    writeByteArray @Double arr posMax newMax
+  -- Lock
+  case spinlock# arr s0 of { s1 ->
+
+  -- Read values
+  case readInt64Array# arr posCount' s1 of { (# s2, oldCount #) ->
+  case readDoubleArray# arr posMean' s2 of { (# s3, oldMean #) ->
+  case readDoubleArray# arr posSumSqDelta' s3 of { (# s4, oldSumSqDelta #) ->
+  case readDoubleArray# arr posSum' s4 of { (# s5, oldSum #) ->
+  case readDoubleArray# arr posMin' s5 of { (# s6, oldMin #) ->
+  case readDoubleArray# arr posMax' s6 of { (# s7, oldMax #) ->
+
+  -- Compute new values
+  case oldCount +# n of { newCount ->
+  case val -## oldMean of { delta ->
+  case int2Double# newCount of { newCount' ->
+  case oldMean +##
+    n' *## delta /## newCount' of { newMean ->
+  case oldSumSqDelta +##
+    delta *## delta *##
+    (n' *## int2Double# oldCount) /## newCount' of { newSumSqDelta ->
+  case oldSum +## n' *## val of { newSum ->
+  case (case val <## oldMin of { 0# -> oldMin; _ -> val }) of { newMin ->
+  case (case val >## oldMax of { 0# -> oldMax; _ -> val }) of { newMax ->
+
+  -- Write new values
+  case writeInt64Array# arr posCount' newCount s7 of { s8 ->
+  case writeDoubleArray# arr posMean' newMean s8 of { s9 ->
+  case writeDoubleArray# arr posSumSqDelta' newSumSqDelta s9 of { s10 ->
+  case writeDoubleArray# arr posSum' newSum s10 of { s11 ->
+  case writeDoubleArray# arr posMin' newMin s11 of { s12 ->
+  case writeDoubleArray# arr posMax' newMax s12 of { s13 ->
+
+  -- Unlock
+  case unlock# arr s13 of { s14 ->
+  s14
+  }}}}}}}}}}}}}}}}}}}}}}}}}}}}}
 
 -- | Adds the data of the left distribution to that of the right
 -- distribution using
 -- http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
 distribCombine :: Distrib -> Distrib -> IO ()
-distribCombine distrib (Distrib accArr) =
-  withLock distrib $ do
-    let Distrib arr = distrib
+distribCombine  (Distrib (MutableByteArray arr))
+                (Distrib (MutableByteArray accArr)) = IO $ \s0 ->
+  case distribCombine# arr accArr s0 of { s1 ->
+  (# s1, () #)
+  }
 
-    count <- readByteArray @Int64 arr posCount
+distribCombine#
+  :: MutableByteArray# RealWorld
+  -> MutableByteArray# RealWorld
+  -> State# RealWorld
+  -> State# RealWorld
+distribCombine# arr accArr s0 =
+  -- Get data positions
+  case posCount of { I# posCount' ->
+  case posMean of { I# posMean' ->
+  case posSumSqDelta of { I# posSumSqDelta' ->
+  case posSum of { I# posSum' ->
+  case posMin of { I# posMin' ->
+  case posMax of { I# posMax' ->
 
-    when (count > 0) $ do
-      mean <- readByteArray @Double arr posMean
-      sumSqDelta <- readByteArray @Double arr posSumSqDelta
-      sum <- readByteArray @Double arr posSum
-      min <- readByteArray @Double arr posMin
-      max <- readByteArray @Double arr posMax
+  -- Lock
+  case spinlock# arr s0 of { s1 ->
 
-      accCount <- readByteArray @Int64 accArr posCount
-      accMean <- readByteArray @Double accArr posMean
-      accSumSqDelta <- readByteArray @Double accArr posSumSqDelta
-      accSum <- readByteArray @Double accArr posSum
-      accMin <- readByteArray @Double accArr posMin
-      accMax <- readByteArray @Double accArr posMax
+  -- Read count from left array
+  case readInt64Array# arr posCount' s1 of { (# s2, count #) ->
 
-      let newCount = count + accCount
-          delta = mean - accMean
-          count' = fromIntegral count
-          countAcc' = fromIntegral accCount
-          newCount' = fromIntegral newCount
-          newMean = (countAcc' * accMean + count' * mean) / newCount'
-          newSumSqDelta = accSumSqDelta + sumSqDelta +
-            delta * delta * (countAcc' * count') / newCount'
-          newSum = sum + accSum
-          newMin = Prelude.min min accMin
-          newMax = Prelude.max max accMax
+  -- If the left array has no data, do not combine its data with that of
+  -- the right array. This is to avoid `NaN`s from divisons by zero when
+  -- the right array also has no data.
+  case count ># 0# of
+    0# ->
+      -- Unlock
+      case unlock# arr s2 of { s3 ->
+      s3
+      }
+    _ ->
+      -- Read other values from left array
+      case readDoubleArray# arr posMean' s2 of { (# s3, mean #) ->
+      case readDoubleArray# arr posSumSqDelta' s3 of { (# s4, sumSqDelta #) ->
+      case readDoubleArray# arr posSum' s4 of { (# s5, sum #) ->
+      case readDoubleArray# arr posMin' s5 of { (# s6, min #) ->
+      case readDoubleArray# arr posMax' s6 of { (# s7, max #) ->
 
-      writeByteArray @Int64 accArr posCount newCount
-      writeByteArray @Double accArr posMean newMean
-      writeByteArray @Double accArr posSumSqDelta newSumSqDelta
-      writeByteArray @Double accArr posSum newSum
-      writeByteArray @Double accArr posMin newMin
-      writeByteArray @Double accArr posMax newMax
+      -- Read values from right array
+      case readInt64Array# accArr posCount' s7 of { (# s8, accCount #) ->
+      case readDoubleArray# accArr posMean' s8 of { (# s9, accMean #) ->
+      case readDoubleArray# accArr posSumSqDelta' s9 of { (# s10, accSumSqDelta #) ->
+      case readDoubleArray# accArr posSum' s10 of { (# s11, accSum #) ->
+      case readDoubleArray# accArr posMin' s11 of { (# s12, accMin #) ->
+      case readDoubleArray# accArr posMax' s12 of { (# s13, accMax #) ->
+
+      -- Compute new values
+      case count +# accCount of { newCount ->
+      case mean -## accMean of { delta ->
+      case int2Double# count of { count' ->
+      case int2Double# accCount of { accCount' ->
+      case int2Double# newCount of { newCount' ->
+      case (accCount' *## accMean +## count' *## mean) /## newCount' of { newMean ->
+      case accSumSqDelta +## sumSqDelta +##
+        delta *## delta *##
+        (accCount' *## count') /## newCount' of { newSumSqDelta ->
+      case accSum +## sum of { newSum ->
+      case (case min <## accMin of { 0# -> accMin; _ -> min }) of { newMin ->
+      case (case max >## accMax of { 0# -> accMax; _ -> max }) of { newMax ->
+
+      -- Write new values
+      case writeInt64Array# accArr posCount' newCount s13 of { s14 ->
+      case writeDoubleArray# accArr posMean' newMean s14 of { s15 ->
+      case writeDoubleArray# accArr posSumSqDelta' newSumSqDelta s15 of { s16 ->
+      case writeDoubleArray# accArr posSum' newSum s16 of { s17 ->
+      case writeDoubleArray# accArr posMin' newMin s17 of { s18 ->
+      case writeDoubleArray# accArr posMax' newMax s18 of { s19 ->
+
+      -- Unlock
+      case unlock# arr s19 of { s20 ->
+      s20
+      }}}}}}}}}}}}}}}}}}}}}}}}}}}}
+  }}}}}}}}
+
+-- Ensure that functions that hold locks never allocate memory. If they
+-- did, threads running those functions could receive exceptions or be
+-- descheduled by the runtime while holding the lock, which could result
+-- in deadlock or severe performance degredation, respectively.
+inspect $ mkObligation 'distribAddN# NoAllocation
+inspect $ mkObligation 'distribCombine# NoAllocation
 
 ------------------------------------------------------------------------
+-- * Distributions
+
 -- Exposed API
 
 -- | Create a new distribution.
@@ -201,7 +302,7 @@ add :: Distribution -> Double -> IO ()
 add distrib val = addN distrib val 1
 
 -- | Add the same value to the distribution N times.
-addN :: Distribution -> Double -> Int64 -> IO ()
+addN :: Distribution -> Double -> Int -> IO ()
 addN distribution val n = do
   distrib <- myStripe distribution
   distribAddN distrib val n
