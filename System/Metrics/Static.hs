@@ -23,7 +23,6 @@ module System.Metrics.Static
   (
     -- * Static metric annotations
     MetricType (..)
-  , MetricValue
 
     -- ** Tags
   , ToTags (..)
@@ -50,6 +49,7 @@ module System.Metrics.Static
     -- ** Registering groups of metrics
   , registerGroup
   , SamplingGroup (..)
+  , MetricValue
 
     -- ** Convenience functions
     -- $convenience
@@ -129,11 +129,11 @@ type family MetricsImpl (t :: MetricType) where
 -- ("tags"), which are used to annotate metrics with additional
 -- information.
 --
--- Each metric must be associated with a type from this class. The type
--- determines the forms of tags that may be attached to the metric.
+-- Each metric must be associated with a type from this typeclass. The
+-- type determines the forms of tags that may be attached to the metric.
 --
--- One may derive a `ToTags` instance for any record that exclusively
--- has fields of type `T.Text` via "GHC.Generics".
+-- For convenience, one may derive a `ToTags` instance for any record
+-- that exclusively has fields of type `T.Text` via "GHC.Generics".
 --
 -- Example usage:
 --
@@ -162,11 +162,15 @@ class ToTags a where
   {-# INLINE toTags #-}
 
 -- | Disallow tags altogether.
+--
+-- > toTags () = HashMap.empty
 instance ToTags () where
   toTags () = M.empty
   {-# INLINE toTags #-}
 
 -- | Place no constraints on tags.
+--
+-- > toTags @(HashMap Text Text) = id
 instance ToTags (M.HashMap T.Text T.Text) where
   toTags = id
   {-# INLINE toTags #-}
@@ -301,9 +305,11 @@ newStore = Store <$> Metrics.newStore
 -- * Scopes
 
 -- $scopes
--- One can view the type parameter of a metric store as its /scope/:
--- the type parameter specifies which metrics the store knows about and,
--- thereby, which it can act upon.
+-- The type parameter of metric store repesents its /scope/. More
+-- precisely, the type parameter of a reference to a metric store
+-- specifies which metrics in the store can be acted upon through the
+-- reference. It provides no information about which metrics may already
+-- be registered in the store.
 --
 -- It may be useful to create a reference to a metrics store that is
 -- scoped to a subset of its metrics. This can be done if the subset can
@@ -315,13 +321,13 @@ newStore = Store <$> Metrics.newStore
 restricted
   :: (forall name metricType tags.
       metricsSubset name metricType tags -> metrics name metricType tags)
-    -- ^ Embedding function
+    -- ^ Subset
   -> Store metrics -- ^ Metrics store
   -> Store metricsSubset
 restricted _ = coerce
 
--- | The largest scope. All scopes can be embedded in this scope via the
--- `subset` function.
+-- | The largest scope, containing all metrics. All scopes can be
+-- embedded in this scope via the `subset` function.
 --
 -- Metrics of any form may be registered to a store of type `AllMetrics`
 -- using the `Metric` constructor. For example:
@@ -340,8 +346,8 @@ subset
   :: metrics name metricType tags -> AllMetrics name metricType tags
 subset _ = Metric
 
--- | The smallest scope. This scope can be embedded in any scope via the
--- `emptySubset` function.
+-- | The smallest scope, containing no metrics. This scope can be
+-- embedded in any scope via the `emptySubset` function.
 --
 -- The only operation available to a store with scope @`EmptyMetrics`@
 -- is `sampleAll`.
@@ -691,7 +697,7 @@ deregister
   :: forall metrics name metricType tags.
       (KnownSymbol name, ToTags tags)
   => metrics name metricType tags -- ^ Metric class
-  -> tags
+  -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO ()
 deregister _ tags (Store store) =
