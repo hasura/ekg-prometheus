@@ -6,6 +6,7 @@ module System.Metrics.Static.GroupExample
   ( main
   ) where
 
+import Control.Monad (void)
 import Data.Kind (Type)
 import GHC.Stats
 import GHC.TypeLits
@@ -22,4 +23,4 @@ main = do
         SamplingGroup
           :> (Gcs, (), fromIntegral . gcs)
           :> (MaxLiveBytes, (), fromIntegral . max_live_bytes)
-  registerGroup samplingGroup getRTSStats store
+  void $ registerGroup samplingGroup getRTSStats store

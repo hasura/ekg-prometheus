@@ -74,9 +74,10 @@ module System.Metrics
     ) where
 
 import Control.Applicative ((<$>))
+import qualified Data.HashMap.Strict as M
 import Data.Int (Int64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
-import qualified Data.HashMap.Strict as M
+import Data.List (foldl')
 import qualified Data.Text as T
 import qualified GHC.Stats as Stats
 import Prelude hiding (read)
@@ -135,6 +136,11 @@ newStore = Store <$> newIORef initialState
 -- Before metrics can be sampled they need to be registered with the
 -- metric store. Passing a metric identifier that has already been used
 -- to one of the register functions will replace the existing metric.
+--
+-- Each registration function also returns an IO action that, when run,
+-- will deregister the newly registered metric, and only that metric.
+-- Indeed, if the registered metric is replaced by another metric, its
+-- deregistration action will have no effect on the state of the store.
 
 -- | Register a non-negative, monotonically increasing, integer-valued
 -- metric. The provided action to read the value must be thread-safe.
@@ -142,7 +148,7 @@ newStore = Store <$> newIORef initialState
 registerCounter :: Identifier -- ^ Counter identifier
                 -> IO Int64   -- ^ Action to read the current metric value
                 -> Store      -- ^ Metric store
-                -> IO ()
+                -> IO (IO ()) -- ^ Deregistration action
 registerCounter identifier sample store =
     register identifier (CounterS sample) store
 
@@ -151,7 +157,7 @@ registerCounter identifier sample store =
 registerGauge :: Identifier -- ^ Gauge identifier
               -> IO Int64   -- ^ Action to read the current metric value
               -> Store      -- ^ Metric store
-              -> IO ()
+              -> IO (IO ()) -- ^ Deregistration action
 registerGauge identifier sample store =
     register identifier (GaugeS sample) store
 
@@ -160,7 +166,7 @@ registerGauge identifier sample store =
 registerLabel :: Identifier -- ^ Label identifier
               -> IO T.Text  -- ^ Action to read the current metric value
               -> Store      -- ^ Metric store
-              -> IO ()
+              -> IO (IO ()) -- ^ Deregistration action
 registerLabel identifier sample store =
     register identifier (LabelS sample) store
 
@@ -171,17 +177,25 @@ registerDistribution
     -> IO Distribution.Stats  -- ^ Action to read the current metric
                               -- value
     -> Store                  -- ^ Metric store
-    -> IO ()
+    -> IO (IO ())             -- ^ Deregistration action
 registerDistribution identifier sample store =
     register identifier (DistributionS sample) store
 
 register :: Identifier
          -> MetricSampler
          -> Store
-         -> IO ()
-register identifier sample store =
-    atomicModifyIORef' (storeState store) $ \state ->
-        (Internal.register identifier sample state, ())
+         -> IO (IO ())
+register identifier sample (Store stateRef) =
+    atomicModifyIORef' stateRef $ \state0 ->
+        let (state1, handle) = Internal.register identifier sample state0
+        in  (state1, deregisterHandle handle stateRef)
+
+-- | Deregister the metric referred to by the given handle.
+deregisterHandle
+  :: Internal.Handle
+  -> IORef Internal.State
+  -> IO ()
+deregisterHandle handle = deregisterHandles [handle]
 
 -- | Register an action that will be executed any time one of the
 -- metrics computed from the value it returns needs to be sampled.
@@ -231,10 +245,20 @@ registerGroup
        (a -> Value)  -- ^ Metric names and getter functions.
     -> IO a          -- ^ Action to sample the metric group
     -> Store         -- ^ Metric store
-    -> IO ()
-registerGroup getters cb store = do
-    atomicModifyIORef' (storeState store) $ \state ->
-        (Internal.registerGroup getters cb state, ())
+    -> IO (IO ())    -- ^ Deregistration action
+registerGroup getters cb (Store stateRef) = do
+    atomicModifyIORef' stateRef $ \state ->
+        let (state, handles) = Internal.registerGroup getters cb state
+        in  (state, deregisterHandles handles stateRef)
+
+-- | Deregister the metrics referred to by the given handles.
+deregisterHandles
+  :: [Internal.Handle]
+  -> IORef Internal.State
+  -> IO ()
+deregisterHandles handles stateRef =
+    atomicModifyIORef' stateRef $ \state ->
+        (foldl' (flip Internal.deregisterByHandle) state handles, ())
 
 ------------------------------------------------------------------------
 -- ** Convenience functions
@@ -243,6 +267,8 @@ registerGroup getters cb store = do
 -- These functions combined the creation of a mutable reference (e.g.
 -- a 'Counter') with registering that reference in the store in one
 -- convenient function.
+--
+-- Deregistration actions are not available through these functions.
 
 -- | Create and register a zero-initialized counter.
 createCounter :: Identifier -- ^ Counter identifier
@@ -250,7 +276,7 @@ createCounter :: Identifier -- ^ Counter identifier
               -> IO Counter
 createCounter identifier store = do
     counter <- Counter.new
-    registerCounter identifier (Counter.read counter) store
+    _ <- registerCounter identifier (Counter.read counter) store
     return counter
 
 -- | Create and register a zero-initialized gauge.
@@ -259,7 +285,7 @@ createGauge :: Identifier -- ^ Gauge identifier
             -> IO Gauge
 createGauge identifier store = do
     gauge <- Gauge.new
-    registerGauge identifier (Gauge.read gauge) store
+    _ <- registerGauge identifier (Gauge.read gauge) store
     return gauge
 
 -- | Create and register an empty label.
@@ -268,7 +294,7 @@ createLabel :: Identifier -- ^ Label identifier
             -> IO Label
 createLabel identifier store = do
     label <- Label.new
-    registerLabel identifier (Label.read label) store
+    _ <- registerLabel identifier (Label.read label) store
     return label
 
 -- | Create and register an event tracker.
@@ -277,7 +303,7 @@ createDistribution :: Identifier -- ^ Distribution identifier
                    -> IO Distribution
 createDistribution identifier store = do
     event <- Distribution.new
-    registerDistribution identifier (Distribution.read event) store
+    _ <- registerDistribution identifier (Distribution.read event) store
     return event
 
 ------------------------------------------------------------------------
@@ -377,7 +403,9 @@ sToMs s = round (s * 1000.0)
 -- 1 for a maximally sequential run and approaches the number of
 -- threads (set by the RTS flag @-N@) for a maximally parallel run.
 --
-registerGcMetrics :: Store -> IO ()
+registerGcMetrics
+  :: Store      -- ^ Metric store
+  -> IO (IO ()) -- ^ Deregistration action
 registerGcMetrics store =
     let taglessId :: T.Text -> Identifier
         taglessId name = Identifier name mempty in

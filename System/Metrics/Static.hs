@@ -366,6 +366,11 @@ emptySubset metrics = case metrics of {}
 -- metric store. Registering a metric with the same set of tags as an
 -- existing metric in the same class will first deregister the existing
 -- metric.
+--
+-- Each registration function also returns an IO action that, when run,
+-- will deregister the newly registered metric, and only that metric.
+-- Indeed, if the registered metric is replaced by another metric, its
+-- deregistration action will have no effect on the state of the store.
 
 -- | Register a non-negative, monotonically increasing, integer-valued
 -- metric. The provided action to read the value must be thread-safe.
@@ -376,7 +381,7 @@ registerCounter
   -> tags -- ^ Tags
   -> IO Int64 -- ^ Action to read the current metric value
   -> Store metrics -- ^ Metric store
-  -> IO ()
+  -> IO (IO ()) -- ^ Deregistration action
 registerCounter = registerGeneric Metrics.registerCounter
 
 -- | Register an integer-valued metric. The provided action to read
@@ -387,7 +392,7 @@ registerGauge
   -> tags -- ^ Tags
   -> IO Int64 -- ^ Action to read the current metric value
   -> Store metrics -- ^ Metric store
-  -> IO ()
+  -> IO (IO ()) -- ^ Deregistration action
 registerGauge = registerGeneric Metrics.registerGauge
 
 -- | Register a text metric. The provided action to read the value
@@ -398,7 +403,7 @@ registerLabel
   -> tags -- ^ Tags
   -> IO T.Text -- ^ Action to read the current metric value
   -> Store metrics -- ^ Metric store
-  -> IO ()
+  -> IO (IO ()) -- ^ Deregistration action
 registerLabel = registerGeneric Metrics.registerLabel
 
 -- | Register a distribution metric. The provided action to read the
@@ -409,7 +414,7 @@ registerDistribution
   -> tags -- ^ Tags
   -> IO Distribution.Stats -- ^ Action to read the current metric value
   -> Store metrics -- ^ Metric store
-  -> IO ()
+  -> IO (IO ()) -- ^ Deregistration action
 registerDistribution = registerGeneric Metrics.registerDistribution
 
 registerGeneric
@@ -417,12 +422,12 @@ registerGeneric
   => ( Metrics.Identifier
       -> IO (MetricValue metricType)
       -> Metrics.Store
-      -> IO ())
+      -> IO (IO ()))
   -> metrics name metricType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO (MetricValue metricType) -- ^ Action to read the current metric value
   -> Store metrics -- ^ Metric store
-  -> IO ()
+  -> IO (IO ()) -- ^ Deregistration action
 registerGeneric f _ tags sample (Store store) =
   let name = T.pack $ symbolVal (Proxy @name)
       identifier = Metrics.Identifier name (toTags tags)
@@ -493,7 +498,7 @@ registerGroup
   => SamplingGroup metrics env xs -- ^ Metric identifiers and getter functions
   -> IO env -- ^ Action to sample the metric group
   -> Store metrics -- ^ Metric store
-  -> IO ()
+  -> IO (IO ()) -- ^ Deregistration action
 registerGroup = registerGroup_ []
 
 
@@ -524,7 +529,7 @@ class RegisterGroup (xs :: [Type]) where
     -> SamplingGroup metrics env xs -- ^ Metrics to be processed
     -> IO env -- ^ Action to sample the metric group
     -> Store metrics -- ^ Metric store
-    -> IO ()
+    -> IO (IO ()) -- ^ Deregistration action
 
 -- | Base case
 instance RegisterGroup '[] where
@@ -555,6 +560,8 @@ instance
 -- These functions combined the creation of a mutable reference (e.g.
 -- a `System.Metrics.Counter.Counter`) with registering that reference
 -- in the store in one convenient function.
+--
+-- Deregistration actions are not available through these functions.
 
 createGeneric
   :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
@@ -686,7 +693,7 @@ createDistribution = createGeneric Metrics.createDistribution
 -- 1 for a maximally sequential run and approaches the number of
 -- threads (set by the RTS flag @-N@) for a maximally parallel run.
 --
-registerGcMetrics :: Store AllMetrics -> IO ()
+registerGcMetrics :: Store AllMetrics -> IO (IO ())
 registerGcMetrics (Store store) = Metrics.registerGcMetrics store
 
 ------------------------------------------------------------------------

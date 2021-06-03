@@ -24,15 +24,22 @@ module System.Metrics.Internal
     , verifyState
 
       -- * State operations
+      -- TODO: Think about order of presentation
     , register
     , registerGroup
     , deregister
+    , Handle
+    , deregisterByHandle
     , deregisterByName
 
       -- * Sampling metrics
     , Sample
     , sampleAll
     , Value(..)
+
+      -- * Testing
+    , SampledState (..)
+    , sampleState
     ) where
 
 import Control.Applicative ((<$>))
@@ -42,7 +49,7 @@ import Data.Int (Int64)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.HashMap.Strict as M
 import qualified Data.HashSet as S
-import Data.List (foldl')
+import Data.List (foldl', mapAccumL)
 import qualified Data.Text as T
 import GHC.Generics
 import Prelude hiding (read)
@@ -53,10 +60,12 @@ import qualified System.Metrics.Distribution as Distribution
 -- * The metric store state
 
 type GroupId = Int
+type Version = Integer
 
 -- | The internal state of the metrics `System.Metrics.Store`.
 data State = State
-     { stateMetrics :: !(M.HashMap Identifier (Either MetricSampler GroupId))
+     { stateMetrics ::
+        !(M.HashMap Identifier (Either MetricSampler GroupId, Version))
         -- ^ A registry of all metrics in the store.
         --
         -- Identifiers are associated with a metric unless they are part
@@ -69,11 +78,16 @@ data State = State
         -- for a metric exactly when the metric's identifier is
         -- associated with the group @g@ in the `stateMetrics` registry;
         -- sample groups must sample for at least one metric.
-     , stateNextId  :: {-# UNPACK #-} !Int
-        -- ^ The `GroupId` to be used for the next created group.
+     , stateNextGroupId  :: {-# UNPACK #-} !Int
+        -- ^ The `GroupId` to be used for the next registered group.
         --
         -- Invariants: Increases monotonically; must be greater than the
         -- `GroupID`s of all existing sample groups.
+     , stateNextMetricVersion :: !Version
+        -- ^ The version to be used for the next registered metric.
+        --
+        -- Invariants: Increases monotonically; must be greater than the
+        -- metric versions of all existing metrics.
      }
 
 -- TODO: Rename this to Metric and Metric to SampledMetric.
@@ -114,7 +128,7 @@ instance Hashable Identifier
 
 -- | The initial state of a new store.
 initialState :: State
-initialState = State M.empty IM.empty 0
+initialState = State M.empty IM.empty 0 0
 
 ------------------------------------------------------------------------
 -- * State verification
@@ -124,6 +138,7 @@ verifyState :: State -> Bool
 verifyState state =
      checkSampleGroups state
   && checkNextGroupId state
+  && checkNextMetricVersion state
 
 -- | Check the following invariants:
 --
@@ -140,7 +155,8 @@ checkSampleGroups State{..} =
 
     groupsFromMetrics =
       foldl' insert_ IM.empty
-        [(id', groupId) | (id', Right groupId) <- M.toList stateMetrics]
+        [(id', groupId) |
+          (id', (Right groupId, _)) <- M.toList stateMetrics]
       where
         insert_ im (name, groupId) = IM.alter (putName name) groupId im
         putName identifier =
@@ -152,12 +168,24 @@ groupSamplerIdentifiers GroupSampler{..} =
 
 -- | Check the following invariant:
 --
--- `stateNextId` must be greater than the `GroupID`s of all existing
+-- `stateNextGroupId` must be greater than the `GroupID`s of all existing
 -- sample groups.
 checkNextGroupId :: State -> Bool
-checkNextGroupId State{..} = maybe True (< stateNextId) mLargestGroupId
+checkNextGroupId State{..} =
+    maybe True (< stateNextGroupId) mLargestGroupId
   where
     mLargestGroupId = fst <$> IM.lookupMax stateGroups
+
+-- | Check the following invariant:
+--
+-- `stateNextMetricVersion` must be greater than the metric versions of
+-- all existing metrics.
+checkNextMetricVersion :: State -> Bool
+checkNextMetricVersion State{..}
+  | null metricVersions = True
+  | otherwise = maximum metricVersions < stateNextMetricVersion
+  where
+    metricVersions = map snd $ M.elems stateMetrics
 
 ------------------------------------------------------------------------
 -- * State operations
@@ -171,19 +199,21 @@ deregister
 deregister identifier state@State{..} =
     case M.lookup identifier stateMetrics of
         Nothing -> state
-        Just (Left _) -> State
+        Just (Left _, _) -> State
             { stateMetrics = M.delete identifier stateMetrics
             , stateGroups = stateGroups
-            , stateNextId = stateNextId
+            , stateNextGroupId = stateNextGroupId
+            , stateNextMetricVersion = stateNextMetricVersion
             }
-        Just (Right groupID) -> State
+        Just (Right groupID, _) -> State
             { stateMetrics = M.delete identifier stateMetrics
             , stateGroups =
                 let delete_ = overGroupSamplerMetrics $ \hm ->
                         let hm' = M.delete identifier hm
                         in  if M.null hm' then Nothing else Just hm'
                 in  IM.update delete_ groupID stateGroups
-            , stateNextId = stateNextId
+            , stateNextGroupId = stateNextGroupId
+            , stateNextMetricVersion = stateNextMetricVersion
             }
 
 overGroupSamplerMetrics ::
@@ -198,33 +228,67 @@ overGroupSamplerMetrics f GroupSampler{..} =
           , groupSamplerMetrics = groupSamplerMetrics'
           }
 
+-- | A reference to a particular version of the metric at an identifier.
+--
+-- A value of this type should never be exposed in order to prevent it
+-- from being applied to the wrong `State`.
+data Handle = Handle Identifier Version
+
+-- | Deregister the particular metric referenced by the handle. That is,
+-- deregister the metric at the given identifier, but only if its
+-- version matches that held by the `Handle`.
+deregisterByHandle :: Handle -> State -> State
+deregisterByHandle (Handle identifier version) state =
+    case M.lookup identifier (stateMetrics state) of
+        Nothing -> state
+        Just (_, version') ->
+            if version == version' then
+                deregister identifier state
+            else
+                state
+
+-- | Deregisters each of the given handles. See `deregisterByHandle`.
+deregisterByHandles :: [Handle] -> State -> State
+deregisterByHandles handles state =
+  foldl' (flip deregisterByHandle) state handles
+
 -- | Register a metric at the given identifier. If the identifier is
 -- already in use by an existing metric, the existing metric is first
--- removed.
+-- removed. Returns a handle for deregistering the registered metric.
 register
     :: Identifier -- ^ Metric identifier
     -> MetricSampler -- ^ Action to sample the metric
-    -> State
-    -> State
+    -> State -- ^ State
+    -> (State, Handle) -- ^ (New state, deregistration handle)
 register identifier sample =
-  insert identifier sample . deregister identifier
+  insertMetricSampler identifier sample . deregister identifier
 
-insert :: Identifier -> MetricSampler -> State -> State
-insert identifier sample state = state
-    { stateMetrics =
-        M.insert identifier (Left sample) $ stateMetrics state
-    }
+insertMetricSampler
+  :: Identifier -> MetricSampler -> State -> (State, Handle)
+insertMetricSampler identifier sampler State{..} =
+  let state = State
+        { stateMetrics =
+            M.insert
+              identifier
+              (Left sampler, stateNextMetricVersion)
+              stateMetrics
+        , stateGroups = stateGroups
+        , stateNextGroupId = stateNextGroupId
+        , stateNextMetricVersion = stateNextMetricVersion + 1
+        }
+      handle = Handle identifier stateNextMetricVersion
+  in  (state, handle)
 
 -- | Register a group of metrics sharing a common sampling action. If
 -- any of the given identifiers are in use by an existing metric, the
--- existing metrics are first removed. See
--- `System.Metrics.registerGroup`.
+-- existing metrics are first removed. Returns handles for deregistering
+-- the registered metrics. See `System.Metrics.registerGroup`.
 registerGroup
     :: M.HashMap Identifier
        (a -> Value)  -- ^ Metric identifiers and getter functions
     -> IO a          -- ^ Action to sample the metric group
     -> State
-    -> State
+    -> (State, [Handle])
 registerGroup getters cb = insertGroup getters cb . delete_
   where
     delete_ state = foldl' (flip deregister) state (M.keys getters)
@@ -234,23 +298,40 @@ insertGroup
        (a -> Value)  -- ^ Metric identifiers and getter functions
     -> IO a          -- ^ Action to sample the metric group
     -> State
-    -> State
+    -> (State, [Handle])
 insertGroup getters cb state
-  | M.null getters = state
+  | M.null getters = (state, [])
   | otherwise =
-      let State{..} = state
-      in  State
-            { stateMetrics =
-                M.foldlWithKey'
-                  (register_ stateNextId) stateMetrics getters
+      let (state', groupId) = insertGroup state
+      in  mapAccumL (insertGroupReference groupId) state' $ M.keys getters
+  where
+    insertGroup :: State -> (State, GroupId)
+    insertGroup State{..} =
+      let state' = State
+            { stateMetrics = stateMetrics
             , stateGroups =
                 IM.insert
-                  stateNextId (GroupSampler cb getters) stateGroups
-            , stateNextId = stateNextId + 1
+                  stateNextGroupId (GroupSampler cb getters) stateGroups
+            , stateNextGroupId = stateNextGroupId + 1
+            , stateNextMetricVersion = stateNextMetricVersion
             }
-  where
-    register_ groupId metrics name _ =
-        M.insert name (Right groupId) metrics
+      in  (state', stateNextGroupId)
+
+    insertGroupReference
+      :: GroupId -> State -> Identifier -> (State, Handle)
+    insertGroupReference groupId State{..} identifier =
+      let state = State
+            { stateMetrics =
+                M.insert
+                  identifier
+                  (Right groupId, stateNextMetricVersion)
+                  stateMetrics
+            , stateGroups = stateGroups
+            , stateNextGroupId = stateNextGroupId
+            , stateNextMetricVersion = stateNextMetricVersion + 1
+            }
+          handle = Handle identifier stateNextMetricVersion
+      in  (state, handle)
 
 -- | Deregister all metrics (of any type) with the given name, ignoring
 -- tags.
@@ -281,7 +362,7 @@ type Sample = M.HashMap Identifier Value
 -- after some other metrics have already been sampled.
 sampleAll :: State -> IO Sample
 sampleAll state = do
-    let metrics = stateMetrics state
+    let metrics = M.map fst $ stateMetrics state
         groups = stateGroups state
     cbSample <- sampleGroups $ IM.elems groups
     sample <- readAllRefs metrics
@@ -319,3 +400,44 @@ readAllRefs m = do
     forM ([(name, ref) | (name, Left ref) <- M.toList m]) $ \ (name, ref) -> do
         val <- sampleOne ref
         return (name, val)
+
+------------------------------------------------------------------------
+-- * Testing
+
+-- | A version of `State` where the samplers have been replaced by their
+-- results. Intended to be used in tests where the samplers are all of
+-- the form @pure x@ for some @x@.
+data SampledState = SampledState
+     { sampledStateMetrics ::
+        !(M.HashMap Identifier (Either Value GroupId, Version))
+     , sampledStateGroups :: !(IM.IntMap (M.HashMap Identifier Value))
+     , sampledStateNextGroupId :: {-# UNPACK #-} !Int
+     , sampledStateNextMetricVersion :: !Version
+     }
+  deriving (Show, Eq)
+
+-- | Run all the sampling actions in the state and replace them with
+-- their results.
+sampleState :: State -> IO SampledState
+sampleState State{..} = do
+  sampledMetrics <- traverse sampleMetric stateMetrics
+  sampledGroups <- traverse sampleGroupSampler stateGroups
+  pure $ SampledState
+     { sampledStateMetrics = sampledMetrics
+     , sampledStateGroups = sampledGroups
+     , sampledStateNextGroupId = stateNextGroupId
+     , sampledStateNextMetricVersion = stateNextMetricVersion
+     }
+  where
+    sampleMetric
+      :: (Either MetricSampler GroupId, Version)
+      -> IO (Either Value GroupId, Version)
+    sampleMetric (Right groupId, version) =
+      pure (Right groupId, version)
+    sampleMetric (Left sample, version) = do
+      value <- sampleOne sample
+      pure (Left value, version)
+
+    sampleGroupSampler :: GroupSampler -> IO (M.HashMap Identifier Value)
+    sampleGroupSampler GroupSampler{..} =
+      (\r -> M.map ($ r) groupSamplerMetrics) <$> groupSampleAction
