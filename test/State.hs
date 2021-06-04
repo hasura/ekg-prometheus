@@ -18,7 +18,7 @@ import qualified Test.QuickCheck as QC
 import qualified Test.SmallCheck as SC
 import qualified Test.SmallCheck.Series as SC
 
-import System.Metrics.Internal
+import System.Metrics.Internal.State
 
 ------------------------------------------------------------------------
 -- * Testing state operations

@@ -4,14 +4,15 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 -- |
--- This module defines the internal state of the metrics store.
+-- This module defines the internal state of the metrics store and all
+-- operations on it.
 --
 -- = Warning
 -- This module is considered __internal__.
 --
 -- The contents of this module may change in any way whatsoever
 -- and without any warning between minor versions of this package.
-module System.Metrics.Internal
+module System.Metrics.Internal.State
     (
       -- * The metric store state
       State

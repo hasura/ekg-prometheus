@@ -6,9 +6,9 @@ module Distribution
   ) where
 
 import Data.Foldable (for_, traverse_)
-import System.Metrics
 import qualified System.Metrics.Distribution as Distribution
 import qualified System.Metrics.Distribution.Internal as Distribution
+import System.Metrics.Internal.Store
 import Test.Hspec
 import Test.HUnit
 

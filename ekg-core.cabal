@@ -25,15 +25,15 @@ library
     System.Metrics.Distribution
     System.Metrics.Distribution.Internal
     System.Metrics.Gauge
-    System.Metrics.Internal
+    System.Metrics.Internal.State
+    System.Metrics.Internal.Store
     System.Metrics.Label
-    System.Metrics.Static
 
   other-modules:
     Data.Array
     Data.Atomic
-    System.Metrics.Static.Example
-    System.Metrics.Static.GroupExample
+    System.Metrics.Example
+    System.Metrics.GroupExample
     System.Metrics.ThreadId
 
   build-depends:

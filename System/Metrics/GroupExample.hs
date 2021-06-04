@@ -2,7 +2,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 
-module System.Metrics.Static.GroupExample
+module System.Metrics.GroupExample
   ( main
   ) where
 
@@ -10,7 +10,7 @@ import Control.Monad (void)
 import Data.Kind (Type)
 import GHC.Stats
 import GHC.TypeLits
-import System.Metrics.Static
+import System.Metrics
 
 data RTSMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
   Gcs :: RTSMetrics "gcs" 'CounterType ()

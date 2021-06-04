@@ -4,7 +4,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module System.Metrics.Static.Example
+module System.Metrics.Example
   ( main
   ) where
 
@@ -14,7 +14,7 @@ import GHC.Generics
 import GHC.TypeLits
 import qualified System.Metrics.Counter as Counter
 import qualified System.Metrics.Gauge as Gauge
-import System.Metrics.Static
+import System.Metrics
 
 data MyMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
   Requests ::
