@@ -23,4 +23,4 @@ main = do
         SamplingGroup
           :> (Gcs, (), fromIntegral . gcs)
           :> (MaxLiveBytes, (), fromIntegral . max_live_bytes)
-  void $ registerGroup samplingGroup getRTSStats store
+  void $ atomicRegister store $ registerGroup samplingGroup getRTSStats

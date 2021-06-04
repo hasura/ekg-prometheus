@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -41,6 +42,8 @@ module System.Metrics.Static
 
     -- * Registering metrics
     -- $registering
+  , Register
+  , atomicRegister
   , registerCounter
   , registerGauge
   , registerLabel
@@ -63,6 +66,8 @@ module System.Metrics.Static
   , registerGcMetrics
 
     -- * Deregistering metrics
+  , Deregister
+  , atomicDeregister
   , deregister
   , deregisterClass
 
@@ -372,6 +377,22 @@ emptySubset metrics = case metrics of {}
 -- Indeed, if the registered metric is replaced by another metric, its
 -- deregistration action will have no effect on the state of the store.
 
+-- | An action that registers metrics to a metric store.
+newtype Register (metric :: Symbol -> MetricType -> Type -> Type)
+  = Register Metrics.Register
+
+instance Semigroup (Register metrics) where
+  Register f <> Register g = Register (f <> g)
+
+-- | Atomically apply a registration action to a metrics store. Returns
+-- an action to (atomically) deregister the newly registered metrics.
+atomicRegister
+  :: Store metrics -- ^ Metric store
+  -> Register metrics -- ^ Registration action
+  -> IO (IO ()) -- ^ Deregistration action
+atomicRegister (Store store) (Register register) =
+    Metrics.atomicRegister store register
+
 -- | Register a non-negative, monotonically increasing, integer-valued
 -- metric. The provided action to read the value must be thread-safe.
 -- Also see 'createCounter'.
@@ -380,8 +401,7 @@ registerCounter
   => metrics name 'CounterType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO Int64 -- ^ Action to read the current metric value
-  -> Store metrics -- ^ Metric store
-  -> IO (IO ()) -- ^ Deregistration action
+  -> Register metrics -- ^ Registration action
 registerCounter = registerGeneric Metrics.registerCounter
 
 -- | Register an integer-valued metric. The provided action to read
@@ -391,8 +411,7 @@ registerGauge
   => metrics name 'GaugeType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO Int64 -- ^ Action to read the current metric value
-  -> Store metrics -- ^ Metric store
-  -> IO (IO ()) -- ^ Deregistration action
+  -> Register metrics -- ^ Registration action
 registerGauge = registerGeneric Metrics.registerGauge
 
 -- | Register a text metric. The provided action to read the value
@@ -402,8 +421,7 @@ registerLabel
   => metrics name 'LabelType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO T.Text -- ^ Action to read the current metric value
-  -> Store metrics -- ^ Metric store
-  -> IO (IO ()) -- ^ Deregistration action
+  -> Register metrics -- ^ Registration action
 registerLabel = registerGeneric Metrics.registerLabel
 
 -- | Register a distribution metric. The provided action to read the
@@ -413,25 +431,22 @@ registerDistribution
   => metrics name 'DistributionType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO Distribution.Stats -- ^ Action to read the current metric value
-  -> Store metrics -- ^ Metric store
-  -> IO (IO ()) -- ^ Deregistration action
+  -> Register metrics -- ^ Registration action
 registerDistribution = registerGeneric Metrics.registerDistribution
 
 registerGeneric
   :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
   => ( Metrics.Identifier
       -> IO (MetricValue metricType)
-      -> Metrics.Store
-      -> IO (IO ()))
+      -> Metrics.Register)
   -> metrics name metricType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO (MetricValue metricType) -- ^ Action to read the current metric value
-  -> Store metrics -- ^ Metric store
-  -> IO (IO ()) -- ^ Deregistration action
-registerGeneric f _ tags sample (Store store) =
+  -> Register metrics -- ^ Registration action
+registerGeneric f _ tags sample =
   let name = T.pack $ symbolVal (Proxy @name)
       identifier = Metrics.Identifier name (toTags tags)
-  in  f identifier sample store
+  in  Register $ f identifier sample
 
 ------------------------------------------------------------------------
 -- ** Registering groups of metrics
@@ -497,8 +512,7 @@ registerGroup
   :: (RegisterGroup xs)
   => SamplingGroup metrics env xs -- ^ Metric identifiers and getter functions
   -> IO env -- ^ Action to sample the metric group
-  -> Store metrics -- ^ Metric store
-  -> IO (IO ()) -- ^ Deregistration action
+  -> Register metrics -- ^ Registration action
 registerGroup = registerGroup_ []
 
 
@@ -528,13 +542,12 @@ class RegisterGroup (xs :: [Type]) where
     :: [(Metrics.Identifier, env -> Metrics.Value)] -- ^ Processed metrics
     -> SamplingGroup metrics env xs -- ^ Metrics to be processed
     -> IO env -- ^ Action to sample the metric group
-    -> Store metrics -- ^ Metric store
-    -> IO (IO ()) -- ^ Deregistration action
+    -> Register metrics -- ^ Registration action
 
 -- | Base case
 instance RegisterGroup '[] where
-  registerGroup_ getters SamplingGroup sample (Store store) =
-    Metrics.registerGroup (M.fromList getters) sample store
+  registerGroup_ getters SamplingGroup sample =
+    Register $ Metrics.registerGroup (M.fromList getters) sample
 
 -- | Inductive case
 instance
@@ -544,14 +557,14 @@ instance
   , ToTags tags
   ) => RegisterGroup (metrics name metricType tags ': xs)
   where
-  registerGroup_ getters (group :> (_, tags, getter)) sample store =
+  registerGroup_ getters (group :> (_, tags, getter)) sample =
     let identifier = Metrics.Identifier
           { Metrics.idName = T.pack $ symbolVal (Proxy @name)
           , Metrics.idTags = toTags tags }
         getter' =
           ( identifier
           , toMetricValue (Proxy @metricType) . getter )
-    in  registerGroup_ (getter' : getters) group sample store
+    in  registerGroup_ (getter' : getters) group sample
 
 ------------------------------------------------------------------------
 -- ** Convenience functions
@@ -693,11 +706,26 @@ createDistribution = createGeneric Metrics.createDistribution
 -- 1 for a maximally sequential run and approaches the number of
 -- threads (set by the RTS flag @-N@) for a maximally parallel run.
 --
-registerGcMetrics :: Store AllMetrics -> IO (IO ())
-registerGcMetrics (Store store) = Metrics.registerGcMetrics store
+registerGcMetrics :: Register AllMetrics
+registerGcMetrics = Register Metrics.registerGcMetrics
 
 ------------------------------------------------------------------------
 -- * Deregistering metrics
+
+-- | An action that deregisters metrics from a metric store.
+newtype Deregister (metrics :: Symbol -> MetricType -> Type -> Type)
+  = Deregister Metrics.Deregister
+
+instance Semigroup (Deregister metrics) where
+  Deregister f <> Deregister g = Deregister (f <> g)
+
+-- | Atomically apply a deregistration action to a metrics store.
+atomicDeregister
+  :: Store metrics -- ^ Metric store
+  -> Deregister metrics -- ^ Registration action
+  -> IO ()
+atomicDeregister (Store store) (Deregister deregister) =
+    Metrics.atomicDeregister store deregister
 
 -- | Deregister a metric of the given class with the given tag set.
 deregister
@@ -705,23 +733,21 @@ deregister
       (KnownSymbol name, ToTags tags)
   => metrics name metricType tags -- ^ Metric class
   -> tags -- ^ Tags
-  -> Store metrics -- ^ Metric store
-  -> IO ()
-deregister _ tags (Store store) =
+  -> Deregister metrics -- ^ Deregistration action
+deregister _ tags =
   let name = T.pack $ symbolVal (Proxy @name)
       identifier = Metrics.Identifier name (toTags tags)
-  in  Metrics.deregister identifier store
+  in  Deregister $ Metrics.deregister identifier
 
 -- | Deregister all metrics of the given class, irrespective of their
 -- tags.
 deregisterClass
   :: forall metrics name metricType tags. (KnownSymbol name)
   => metrics name metricType tags -- ^ Metric class
-  -> Store metrics -- ^ Metric store
-  -> IO ()
-deregisterClass _ (Store store) =
+  -> Deregister metrics -- ^ Deregistration action
+deregisterClass _ =
   let name = T.pack $ symbolVal (Proxy @name)
-  in  Metrics.deregisterByName name store
+  in  Deregister $ Metrics.deregisterByName name
 
 ------------------------------------------------------------------------
 -- * Sampling metrics

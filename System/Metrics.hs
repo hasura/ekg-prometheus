@@ -45,6 +45,8 @@ module System.Metrics
 
       -- * Registering metrics
       -- $registering
+    , Register
+    , atomicRegister
     , registerCounter
     , registerGauge
     , registerLabel
@@ -63,6 +65,8 @@ module System.Metrics
     , registerGcMetrics
 
       -- * Deregistering metrics
+    , Deregister
+    , atomicDeregister
     , deregister
     , deregisterByName
 
@@ -142,60 +146,77 @@ newStore = Store <$> newIORef initialState
 -- Indeed, if the registered metric is replaced by another metric, its
 -- deregistration action will have no effect on the state of the store.
 
+-- | An action that registers metrics to a metric store.
+newtype Register = Register (State -> (State, [Handle] -> [Handle]))
+
+instance Semigroup Register where
+  Register f <> Register g = Register $ \state0 ->
+    let (state1, h1) = f state0
+        (state2, h2) = g state1
+    in  (state2, h2 . h1)
+
+-- | Atomically apply a registration action to a metrics store. Returns
+-- an action to (atomically) deregister the newly registered metrics.
+atomicRegister
+  :: Store -- ^ Metric store
+  -> Register -- ^ Registration action
+  -> IO (IO ()) -- ^ Deregistration action
+atomicRegister (Store stateRef) (Register f) =
+    atomicModifyIORef' stateRef $ \state0 ->
+        let (state1, handles') = f state0
+            deregisterAction = deregisterHandles (handles' []) stateRef
+        in  (state1, deregisterAction)
+
+-- | Deregister the metrics referred to by the given handles.
+deregisterHandles
+  :: [Internal.Handle]
+  -> IORef Internal.State
+  -> IO ()
+deregisterHandles handles stateRef =
+    atomicModifyIORef' stateRef $ \state ->
+        (foldl' (flip Internal.deregisterByHandle) state handles, ())
+
 -- | Register a non-negative, monotonically increasing, integer-valued
 -- metric. The provided action to read the value must be thread-safe.
 -- Also see 'createCounter'.
 registerCounter :: Identifier -- ^ Counter identifier
                 -> IO Int64   -- ^ Action to read the current metric value
-                -> Store      -- ^ Metric store
-                -> IO (IO ()) -- ^ Deregistration action
-registerCounter identifier sample store =
-    register identifier (CounterS sample) store
+                -> Register -- ^ Registration action
+registerCounter identifier sample =
+    registerGeneric identifier (CounterS sample)
 
 -- | Register an integer-valued metric. The provided action to read
 -- the value must be thread-safe. Also see 'createGauge'.
 registerGauge :: Identifier -- ^ Gauge identifier
               -> IO Int64   -- ^ Action to read the current metric value
-              -> Store      -- ^ Metric store
-              -> IO (IO ()) -- ^ Deregistration action
-registerGauge identifier sample store =
-    register identifier (GaugeS sample) store
+              -> Register -- ^ Registration action
+registerGauge identifier sample =
+    registerGeneric identifier (GaugeS sample)
 
 -- | Register a text metric. The provided action to read the value
 -- must be thread-safe. Also see 'createLabel'.
 registerLabel :: Identifier -- ^ Label identifier
               -> IO T.Text  -- ^ Action to read the current metric value
-              -> Store      -- ^ Metric store
-              -> IO (IO ()) -- ^ Deregistration action
-registerLabel identifier sample store =
-    register identifier (LabelS sample) store
+              -> Register -- ^ Registration action
+registerLabel identifier sample =
+    registerGeneric identifier (LabelS sample)
 
 -- | Register a distribution metric. The provided action to read the
 -- value must be thread-safe. Also see 'createDistribution'.
 registerDistribution
     :: Identifier             -- ^ Distribution identifier
     -> IO Distribution.Stats  -- ^ Action to read the current metric
-                              -- value
-    -> Store                  -- ^ Metric store
-    -> IO (IO ())             -- ^ Deregistration action
-registerDistribution identifier sample store =
-    register identifier (DistributionS sample) store
+    -> Register -- ^ Registration action
+registerDistribution identifier sample =
+    registerGeneric identifier (DistributionS sample)
 
-register :: Identifier
-         -> MetricSampler
-         -> Store
-         -> IO (IO ())
-register identifier sample (Store stateRef) =
-    atomicModifyIORef' stateRef $ \state0 ->
-        let (state1, handle) = Internal.register identifier sample state0
-        in  (state1, deregisterHandle handle stateRef)
-
--- | Deregister the metric referred to by the given handle.
-deregisterHandle
-  :: Internal.Handle
-  -> IORef Internal.State
-  -> IO ()
-deregisterHandle handle = deregisterHandles [handle]
+registerGeneric
+  :: Identifier -- ^ Metric identifier
+  -> MetricSampler -- ^ Sampling action
+  -> Register -- ^ Registration action
+registerGeneric identifier sample = Register $ \state0 ->
+    let (state1, handle) = Internal.register identifier sample state0
+    in  (state1, (:) handle)
 
 -- | Register an action that will be executed any time one of the
 -- metrics computed from the value it returns needs to be sampled.
@@ -244,21 +265,10 @@ registerGroup
     :: M.HashMap Identifier
        (a -> Value)  -- ^ Metric names and getter functions.
     -> IO a          -- ^ Action to sample the metric group
-    -> Store         -- ^ Metric store
-    -> IO (IO ())    -- ^ Deregistration action
-registerGroup getters cb (Store stateRef) = do
-    atomicModifyIORef' stateRef $ \state ->
-        let (state, handles) = Internal.registerGroup getters cb state
-        in  (state, deregisterHandles handles stateRef)
-
--- | Deregister the metrics referred to by the given handles.
-deregisterHandles
-  :: [Internal.Handle]
-  -> IORef Internal.State
-  -> IO ()
-deregisterHandles handles stateRef =
-    atomicModifyIORef' stateRef $ \state ->
-        (foldl' (flip Internal.deregisterByHandle) state handles, ())
+    -> Register -- ^ Registration action
+registerGroup getters cb = Register $ \state0 ->
+    let (state1, handles) = Internal.registerGroup getters cb state0
+    in  (state1, (++) handles)
 
 ------------------------------------------------------------------------
 -- ** Convenience functions
@@ -276,7 +286,8 @@ createCounter :: Identifier -- ^ Counter identifier
               -> IO Counter
 createCounter identifier store = do
     counter <- Counter.new
-    _ <- registerCounter identifier (Counter.read counter) store
+    _ <- atomicRegister store $
+          registerCounter identifier (Counter.read counter)
     return counter
 
 -- | Create and register a zero-initialized gauge.
@@ -285,7 +296,8 @@ createGauge :: Identifier -- ^ Gauge identifier
             -> IO Gauge
 createGauge identifier store = do
     gauge <- Gauge.new
-    _ <- registerGauge identifier (Gauge.read gauge) store
+    _ <- atomicRegister store $
+          registerGauge identifier (Gauge.read gauge)
     return gauge
 
 -- | Create and register an empty label.
@@ -294,7 +306,8 @@ createLabel :: Identifier -- ^ Label identifier
             -> IO Label
 createLabel identifier store = do
     label <- Label.new
-    _ <- registerLabel identifier (Label.read label) store
+    _ <- atomicRegister store $
+          registerLabel identifier (Label.read label)
     return label
 
 -- | Create and register an event tracker.
@@ -303,7 +316,8 @@ createDistribution :: Identifier -- ^ Distribution identifier
                    -> IO Distribution
 createDistribution identifier store = do
     event <- Distribution.new
-    _ <- registerDistribution identifier (Distribution.read event) store
+    _ <- atomicRegister store $
+          registerDistribution identifier (Distribution.read event)
     return event
 
 ------------------------------------------------------------------------
@@ -403,10 +417,8 @@ sToMs s = round (s * 1000.0)
 -- 1 for a maximally sequential run and approaches the number of
 -- threads (set by the RTS flag @-N@) for a maximally parallel run.
 --
-registerGcMetrics
-  :: Store      -- ^ Metric store
-  -> IO (IO ()) -- ^ Deregistration action
-registerGcMetrics store =
+registerGcMetrics :: Register
+registerGcMetrics =
     let taglessId :: T.Text -> Identifier
         taglessId name = Identifier name mempty in
     registerGroup
@@ -461,7 +473,6 @@ registerGcMetrics store =
      ])
     getGcStats
 #endif
-    store
 
 #if MIN_VERSION_base(4,10,0)
 -- | Get RTS statistics.
@@ -570,26 +581,32 @@ gcParTotBytesCopied = Stats.parAvgBytesCopied
 ------------------------------------------------------------------------
 -- * Deregistering metrics
 
--- Documentation TODO
+-- | An action that deregisters metrics from a metric store.
+newtype Deregister = Deregister (State -> State)
+
+instance Semigroup Deregister where
+  Deregister f <> Deregister g = Deregister (g . f)
+
+-- | Atomically apply a deregistration action to a metrics store.
+atomicDeregister
+  :: Store -- ^ Metric store
+  -> Deregister -- ^ Registration action
+  -> IO ()
+atomicDeregister (Store stateRef) (Deregister f) =
+    atomicModifyIORef' stateRef $ \state -> (f state, ())
 
 -- | Deregister a metric (of any type).
 deregister
   :: Identifier -- ^ Metric identifier
-  -> Store -- ^ Metric store
-  -> IO ()
-deregister identifier store =
-    atomicModifyIORef' (storeState store) $ \state ->
-        (Internal.deregister identifier state, ())
+  -> Deregister -- ^ Deregistration action
+deregister identifier = Deregister $ Internal.deregister identifier
 
 -- | Deregister all metrics (of any type) with the given name, that is,
 -- irrespective of their tags.
 deregisterByName
   :: T.Text -- ^ Metric name
-  -> Store -- ^ Metric store
-  -> IO ()
-deregisterByName name store =
-    atomicModifyIORef' (storeState store) $ \state ->
-        (Internal.deregisterByName name state, ())
+  -> Deregister -- ^ Deregistration action
+deregisterByName name = Deregister $ Internal.deregisterByName name
 
 ------------------------------------------------------------------------
 -- * Sampling metrics
