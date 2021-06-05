@@ -13,43 +13,91 @@
 {-# LANGUAGE TypeOperators #-}
 
 -- |
--- This module wraps "System.Metrics" and presents an alternative
--- interface where the types, names, and (the forms of) tags of metrics
--- registered to a `Store` are statically known.
+-- A module for defining metrics that can be monitored.
 --
--- The functions presented in this interface are exactly the same as
--- their counterparts in "System.Metrics", except that they have been
--- restricted to work on only a narrow, user-defined set of inputs.
+-- Metrics are used to monitor program behavior and performance. All
+-- metrics have
+--
+--  * a name,
+--
+--  * a set of tags, and
+--
+--  * a way to get the metric's current value.
+--
+-- This module provides a way to register metrics in a global \"metric
+-- store\". The store can then be used to get a snapshot of all
+-- metrics. The store also serves as a central place to keep track of
+-- all the program's metrics, both user and library defined.
+--
+-- Here's an example of creating a single counter, used to count the
+-- number of request served by a web server:
+--
+-- > import Data.Kind (Type)
+-- > import GHC.TypeLits (Symbol)
+-- > import System.Metrics
+-- > import qualified System.Metrics.Counter as Counter
+-- >
+-- > -- A user-specified GADT statically determines the names, types, and
+-- > -- possible tags of the metrics that can be registered to the store.
+-- >
+-- > data AppMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
+-- >     RequestCount :: AppMetrics "myapp.request_count" 'CounterType ()
+-- >
+-- > main = do
+-- >     store <- newStore @AppMetrics
+-- >     requests <- createCounter RequestCount () store
+-- >     -- Every time we receive a request:
+-- >     Counter.inc requests
+--
+-- This module also provides a way to register a number of predefined
+-- metrics that are useful in most applications. See e.g.
+-- 'registerGcMetrics'.
+
+
+-- Implementation note:
+-- This module merely wraps and restricts the interface of
+-- "System.Metrics.Internal.Store". That is, the functions presented in
+-- this interface are exactly the same as their counterparts in
+-- "System.Metrics", except that they have been restricted to work on
+-- only a narrow, user-defined set of inputs.
+
 module System.Metrics
   (
+    -- * Naming metrics
+    -- $naming
+
+    -- * The metric store
+    -- $metric-store
+    Store
+  , newStore
+
     -- * Static metric annotations
-    MetricType (..)
+  , MetricType (..)
 
     -- ** Tags
   , ToTags (..)
 
-    -- * The metric store
-  , Store
-  , newStore
-
-    -- * Scopes
+    -- * Changing scope
     -- $scopes
-  , restricted
-  , AllMetrics (..)
   , subset
-  , EmptyMetrics
-  , emptySubset
 
-    -- * Registering metrics
+    -- ** Common scopes
+  , EmptyMetrics
+  , emptyOf
+  , AllMetrics (..)
+  , ofAll
+
+    -- * Registering and deregistering metrics
+    -- $registering-and-deregistering
+
+    -- ** Registering
     -- $registering
-  , Register
-  , atomicRegister
+  , register
+  , Registration
   , registerCounter
   , registerGauge
   , registerLabel
   , registerDistribution
-
-    -- ** Registering groups of metrics
   , registerGroup
   , SamplingGroup (..)
   , MetricValue
@@ -61,14 +109,11 @@ module System.Metrics
   , createLabel
   , createDistribution
 
-    -- ** Predefined metrics
-    -- $predefined
-  , registerGcMetrics
-
-    -- * Deregistering metrics
-  , Deregister
-  , atomicDeregister
+    -- ** Deregistering
+    -- $deregistering
+  , Deregistration
   , deregister
+  , deregisterMetric
   , deregisterClass
 
     -- * Sampling metrics
@@ -77,6 +122,10 @@ module System.Metrics
   , Metrics.Sample
   , Metrics.Identifier (..)
   , Metrics.Value (..)
+
+    -- * Predefined metrics
+    -- $predefined
+  , registerGcMetrics
   ) where
 
 import Data.Coerce (coerce)
@@ -90,8 +139,57 @@ import GHC.TypeLits
 import qualified System.Metrics.Counter as Counter
 import qualified System.Metrics.Distribution as Distribution
 import qualified System.Metrics.Gauge as Gauge
-import qualified System.Metrics.Internal.Store as Metrics
+import qualified System.Metrics.Internal.Store as Metrics -- TODO: Import as Internal
 import qualified System.Metrics.Label as Label
+
+-- $naming
+-- Compound metric names should be separated using underscores.
+-- Example: @request_count@. Periods in the name imply namespacing.
+-- Example: @\"myapp.users\"@. Some consumers of metrics will use
+-- these namespaces to group metrics in e.g. UIs.
+--
+-- Libraries and frameworks that want to register their own metrics
+-- should prefix them with a namespace, to avoid collision with
+-- user-defined metrics and metrics defined by other libraries. For
+-- example, the Snap web framework could prefix all its metrics with
+-- @\"snap.\"@.
+--
+-- It's customary to suffix the metric name with a short string
+-- explaining the metric's type e.g. using @\"_ms\"@ to denote
+-- milliseconds.
+
+------------------------------------------------------------------------
+-- * The metric store
+
+-- $metric-store
+-- The metric store is a shared store of metrics. It allows several
+-- disjoint components (e.g. libraries) to contribute to the set of
+-- metrics exposed by an application. Libraries that want to provide a
+-- set of metrics should define a register method, in the style of
+-- 'registerGcMetrics', that registers the metrics in the 'Store'. The
+-- register function should document which metrics are registered and
+-- their types (i.e. counter, gauge, label, or distribution).
+--
+-- References to metric stores are parameterized a type that restricts
+-- the kinds of metrics that may be added to or removed from the `Store`
+-- through the reference. In other words, they are /scoped/ by their
+-- type parameter. Users are expected to parameterize their metric
+-- stores with custom GADTs that describe the kinds of metrics that may
+-- be collected in their applications.
+
+-- | A mutable metric store, parameterized by a type @metrics@ whose
+-- values @v@ represent the classes of metrics that may be registered to
+-- the store.
+--
+-- The metrics of each class @v :: metrics name metricType tags@ have
+-- their name, metric type, and possible tags statically determined by
+-- the respective type indices of @metrics@.
+newtype Store (metrics :: Symbol -> MetricType -> Type -> Type) =
+  Store Metrics.Store
+
+-- | Create a new, empty metric store.
+newStore :: IO (Store metrics)
+newStore = Store <$> Metrics.newStore
 
 ------------------------------------------------------------------------
 -- * Static metric annotations
@@ -104,7 +202,7 @@ data MetricType
   | LabelType
   | DistributionType
 
--- | The type of value sampled by each metric.
+-- | The type of values sampled by each metric.
 type family MetricValue (t :: MetricType) :: Type where
   MetricValue 'CounterType = Int64
   MetricValue 'GaugeType = Int64
@@ -130,15 +228,16 @@ type family MetricsImpl (t :: MetricType) where
 ------------------------------------------------------------------------
 -- ** Tags
 
--- | Class of types that can be converted to sets of key-value pairs
--- ("tags"), which are used to annotate metrics with additional
--- information.
+-- | A class of types that can be converted to sets of key-value pairs
+-- ("tags"), which are used to annotate metrics with metadata.
 --
 -- Each metric must be associated with a type from this typeclass. The
--- type determines the forms of tags that may be attached to the metric.
+-- type determines the possible tag sets that may be attached to the
+-- metric.
 --
--- For convenience, one may derive a `ToTags` instance for any record
--- that exclusively has fields of type `T.Text` via "GHC.Generics".
+-- For convenience, one may derive, via "GHC.Generics", a `ToTags`
+-- instance for any record that exclusively has fields of type `T.Text`.
+-- [TODO: Support more field types for deriving.]
 --
 -- Example usage:
 --
@@ -217,122 +316,43 @@ instance GToTags (K1 i T.Text) where
   {-# INLINE gToTags #-}
 
 ------------------------------------------------------------------------
--- * The metric store
-
--- | A mutable metric store, parameterized by a type @metrics@ whose
--- values @v@ represent the (classes of) metrics that may be registered
--- to the store.
---
--- The metrics of each class @v :: metrics name metricType tags@ have
--- their type, name, and (the form of) their tags determined by the type
--- indices of @metrics@.
---
--- Example usage:
---
--- > {-# LANGUAGE DataKinds #-}
--- > {-# LANGUAGE DeriveGeneric #-}
--- > {-# LANGUAGE GADTs #-}
--- > {-# LANGUAGE KindSignatures #-}
--- > {-# LANGUAGE OverloadedStrings #-}
--- >
--- > module System.Metrics.Static.Example
--- >   ( main
--- >   ) where
--- >
--- > import Data.Kind (Type)
--- > import qualified Data.Text as T
--- > import GHC.Generics
--- > import GHC.TypeLits
--- > import qualified System.Metrics.Counter as Counter
--- > import qualified System.Metrics.Gauge as Gauge
--- > import System.Metrics.Static
--- >
--- > data MyMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
--- >   Requests ::
--- >     MyMetrics "requests" 'CounterType EndpointTags
--- >   DBConnections ::
--- >     MyMetrics "postgres.total_connections" 'GaugeType DataSourceTags
--- >
--- > newtype EndpointTags = EndpointTags { endpoint :: T.Text }
--- >   deriving (Generic)
--- > instance ToTags EndpointTags
--- >
--- > data DataSourceTags = DataSourceTags
--- >   { sourceName :: T.Text
--- >   , connInfo :: T.Text
--- >   } deriving (Generic)
--- > instance ToTags DataSourceTags
--- >
--- > main :: IO ()
--- > main = do
--- >   store <- newStore
--- >   harpsichordReqs <-
--- >     createCounter Requests (EndpointTags "dev/harpsichord") store
--- >   tablaReqs <-
--- >     createCounter Requests (EndpointTags "dev/tabla") store
--- >   dbConnections <-
--- >     let tags = DataSourceTags
--- >           { sourceName = "myDB"
--- >           , connInfo = "localhost:5432"
--- >           }
--- >     in  createGauge DBConnections tags store
--- >
--- >   Counter.add harpsichordReqs 5
--- >   Counter.add tablaReqs 10
--- >   Gauge.set dbConnections 99
--- >
--- >   stats <- sampleAll store
--- >   print stats
---
--- >>> main
--- fromList
---  [ ( Identifier
---      { idName = "requests"
---      , idTags = fromList [("endpoint","dev/tabla")] }
---    , Counter 10 )
---  , ( Identifier
---      { idName = "postgres.total_connections"
---      , idTags = fromList [("sourceName","myDB"),("connInfo","localhost:5432")] }
---    , Gauge 99 )
---  , ( Identifier
---      { idName = "requests"
---      , idTags = fromList [("endpoint","dev/harpsichord")] }
---    , Counter 5 )
---  ]
-newtype Store (metrics :: Symbol -> MetricType -> Type -> Type) =
-  Store Metrics.Store
-
--- | Create a new, empty metric store.
-newStore :: IO (Store metrics)
-newStore = Store <$> Metrics.newStore
-
-------------------------------------------------------------------------
--- * Scopes
+-- * Changing scope
 
 -- $scopes
--- The type parameter of metric store repesents its /scope/. More
--- precisely, the type parameter of a reference to a metric store
--- specifies which metrics in the store can be acted upon through the
--- reference. It provides no information about which metrics may already
--- be registered in the store.
+-- References to metric stores are parameterized by types that restrict
+-- the kinds of metrics that may be added to or removed from the store
+-- through the references. In other words, they are /scoped/ by their
+-- type parameter.
 --
--- It may be useful to create a reference to a metrics store that is
--- scoped to a subset of its metrics. This can be done if the subset can
--- be represented by a function @f :: metricsSubset name metricType tags
--- -> metrics name metricType tags@.
+-- It may be useful to create a new reference to a metric store that is
+-- scoped to a subset of its metrics. This can be done as long as the
+-- subset can be represented by a function (see `subset`).
 
--- | Create a reference to an existing metric store with restricted
--- scope.
-restricted
+-- | Create a new reference to a metric store with restricted scope.
+subset
   :: (forall name metricType tags.
       metricsSubset name metricType tags -> metrics name metricType tags)
     -- ^ Subset
-  -> Store metrics -- ^ Metrics store
-  -> Store metricsSubset
-restricted _ = coerce
+  -> Store metrics -- ^ Reference
+  -> Store metricsSubset -- ^ Restricted reference
+subset _ = coerce
+
+-- ** Common scopes
+
+-- | The smallest scope, containing no metrics. This scope can be
+-- embedded in any scope via the `emptyOf` function.
+--
+-- The only operation available to a store with scope @`EmptyMetrics`@
+-- is `sampleAll`.
+data EmptyMetrics :: Symbol -> MetricType -> Type -> Type where
+
+-- | The smallest scope can be embedded in any scope.
+emptyOf
+  :: EmptyMetrics name metricType tags -> metrics name metricType tags
+emptyOf metrics = case metrics of {}
 
 -- | The largest scope, containing all metrics. All scopes can be
--- embedded in this scope via the `subset` function.
+-- embedded in this scope via the `ofAll` function.
 --
 -- Metrics of any form may be registered to a store of type `AllMetrics`
 -- using the `Metric` constructor. For example:
@@ -347,51 +367,50 @@ _exampleAllMetrics :: Store AllMetrics -> IO Counter.Counter
 _exampleAllMetrics = createCounter (Metric @"total_requests") ()
 
 -- | All scopes can be embedded in the largest scope.
-subset
+ofAll
   :: metrics name metricType tags -> AllMetrics name metricType tags
-subset _ = Metric
-
--- | The smallest scope, containing no metrics. This scope can be
--- embedded in any scope via the `emptySubset` function.
---
--- The only operation available to a store with scope @`EmptyMetrics`@
--- is `sampleAll`.
-data EmptyMetrics :: Symbol -> MetricType -> Type -> Type where
-
--- | The smallest scope can be embedded in any scope.
-emptySubset
-  :: EmptyMetrics name metricType tags -> metrics name metricType tags
-emptySubset metrics = case metrics of {}
+ofAll _ = Metric
 
 ------------------------------------------------------------------------
--- * Registering metrics
+-- * Registering and deregistering metrics
+
+-- $registering-and-deregistering
+-- Before metrics can be sampled, they need to be registered with the
+-- metric store. Once registered, metrics can also be deregistered.
+
+------------------------------------------------------------------------
+-- ** Registering
 
 -- $registering
--- Before metrics can be sampled they need to be registered with the
--- metric store. Registering a metric with the same set of tags as an
--- existing metric in the same class will first deregister the existing
--- metric.
+-- Metrics are identified by the combination of the class they are
+-- registered to and the tag set they are registered with. If you try to
+-- register a metric at an identifier that is already in use by an
+-- existing metric, the existing metric will be deregistered and
+-- replaced by the new metric.
 --
--- Each registration function also returns an IO action that, when run,
--- will deregister the newly registered metric, and only that metric.
--- Indeed, if the registered metric is replaced by another metric, its
--- deregistration action will have no effect on the state of the store.
+-- Upon `register`ing a set of metrics, you will be given a handle that
+-- can be used to deregister the newly registered metrics /specifically/,
+-- in the following sense. If a deregistration handle is supposed to
+-- deregister a metric, and that metric is replaced by a new metric, the
+-- new metric will not be deregistered if the handle is handle used.
 
--- | An action that registers metrics to a metric store.
-newtype Register (metric :: Symbol -> MetricType -> Type -> Type)
-  = Register Metrics.Register
-
-instance Semigroup (Register metrics) where
-  Register f <> Register g = Register (f <> g)
-
--- | Atomically apply a registration action to a metrics store. Returns
--- an action to (atomically) deregister the newly registered metrics.
-atomicRegister
+-- | Atomically register one or more metrics. Returns a handle for
+-- (atomically) deregistering those metrics specifically.
+register
   :: Store metrics -- ^ Metric store
-  -> Register metrics -- ^ Registration action
-  -> IO (IO ()) -- ^ Deregistration action
-atomicRegister (Store store) (Register register) =
-    Metrics.atomicRegister store register
+  -> Registration metrics -- ^ Registration action
+  -> IO (IO ()) -- ^ Deregistration handle
+register (Store store) (Registration register) =
+    Metrics.register store register
+
+-- | An action that registers one or more metrics to a metric store.
+-- Can only be run by `register`.
+newtype Registration (metric :: Symbol -> MetricType -> Type -> Type)
+  = Registration Metrics.Registration
+
+-- | Combine registration actions by running one after the other.
+instance Semigroup (Registration metrics) where
+  Registration f <> Registration g = Registration (f <> g)
 
 -- | Register a non-negative, monotonically increasing, integer-valued
 -- metric. The provided action to read the value must be thread-safe.
@@ -401,7 +420,7 @@ registerCounter
   => metrics name 'CounterType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO Int64 -- ^ Action to read the current metric value
-  -> Register metrics -- ^ Registration action
+  -> Registration metrics
 registerCounter = registerGeneric Metrics.registerCounter
 
 -- | Register an integer-valued metric. The provided action to read
@@ -411,7 +430,7 @@ registerGauge
   => metrics name 'GaugeType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO Int64 -- ^ Action to read the current metric value
-  -> Register metrics -- ^ Registration action
+  -> Registration metrics
 registerGauge = registerGeneric Metrics.registerGauge
 
 -- | Register a text metric. The provided action to read the value
@@ -421,7 +440,7 @@ registerLabel
   => metrics name 'LabelType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO T.Text -- ^ Action to read the current metric value
-  -> Register metrics -- ^ Registration action
+  -> Registration metrics
 registerLabel = registerGeneric Metrics.registerLabel
 
 -- | Register a distribution metric. The provided action to read the
@@ -431,25 +450,22 @@ registerDistribution
   => metrics name 'DistributionType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO Distribution.Stats -- ^ Action to read the current metric value
-  -> Register metrics -- ^ Registration action
+  -> Registration metrics
 registerDistribution = registerGeneric Metrics.registerDistribution
 
 registerGeneric
   :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
   => ( Metrics.Identifier
       -> IO (MetricValue metricType)
-      -> Metrics.Register)
+      -> Metrics.Registration)
   -> metrics name metricType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO (MetricValue metricType) -- ^ Action to read the current metric value
-  -> Register metrics -- ^ Registration action
+  -> Registration metrics -- ^ Registration action
 registerGeneric f _ tags sample =
   let name = T.pack $ symbolVal (Proxy @name)
       identifier = Metrics.Identifier name (toTags tags)
-  in  Register $ f identifier sample
-
-------------------------------------------------------------------------
--- ** Registering groups of metrics
+  in  Registration $ f identifier sample
 
 -- | Register an action that will be executed any time one of the
 -- metrics computed from the value it returns needs to be sampled.
@@ -482,37 +498,31 @@ registerGeneric f _ tags sample =
 --
 -- Example usage:
 --
--- > {-# LANGUAGE DataKinds #-}
--- > {-# LANGUAGE GADTs #-}
--- > {-# LANGUAGE KindSignatures #-}
--- >
--- > module System.Metrics.Static.GroupExample
--- >   ( main
--- >   ) where
--- >
 -- > import Data.Kind (Type)
 -- > import GHC.Stats
--- > import GHC.TypeLits
--- > import System.Metrics.Static
+-- > import GHC.TypeLits (Symbol)
+-- > import System.Metrics
 -- >
 -- > data RTSMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
 -- >   Gcs :: RTSMetrics "gcs" 'CounterType ()
 -- >   MaxLiveBytes :: RTSMetrics "max_live_bytes" 'GaugeType ()
 -- >
--- > main :: IO ()
 -- > main = do
 -- >   store <- newStore
 -- >   let samplingGroup =
 -- >         SamplingGroup
 -- >           :> (Gcs, (), fromIntegral . gcs)
 -- >           :> (MaxLiveBytes, (), fromIntegral . max_live_bytes)
--- >   registerGroup samplingGroup getRTSStats store
+-- >   _ <- register store $ registerGroup samplingGroup getRTSStats
+-- >   pure ()
+--
+-- (Note: The @RegisterGroup@ constraint can safely be ignored.)
 --
 registerGroup
   :: (RegisterGroup xs)
   => SamplingGroup metrics env xs -- ^ Metric identifiers and getter functions
   -> IO env -- ^ Action to sample the metric group
-  -> Register metrics -- ^ Registration action
+  -> Registration metrics -- ^ Registration action
 registerGroup = registerGroup_ []
 
 
@@ -528,11 +538,11 @@ data SamplingGroup
   SamplingGroup :: SamplingGroup metrics env '[]
   -- | Add a metric to a sampling group
   (:>)
-    :: SamplingGroup metrics env xs -- ^ Sampling group
+    :: SamplingGroup metrics env xs -- ^ Group to add to
     ->  ( metrics name metricType tags
         , tags
         , env -> MetricValue metricType )
-        -- ^ (Metric class, Tags, Getter function)
+        -- ^ Metric class, Tags, Getter function
     -> SamplingGroup metrics env (metrics name metricType tags ': xs)
 
 
@@ -542,12 +552,12 @@ class RegisterGroup (xs :: [Type]) where
     :: [(Metrics.Identifier, env -> Metrics.Value)] -- ^ Processed metrics
     -> SamplingGroup metrics env xs -- ^ Metrics to be processed
     -> IO env -- ^ Action to sample the metric group
-    -> Register metrics -- ^ Registration action
+    -> Registration metrics
 
 -- | Base case
 instance RegisterGroup '[] where
   registerGroup_ getters SamplingGroup sample =
-    Register $ Metrics.registerGroup (M.fromList getters) sample
+    Registration $ Metrics.registerGroup (M.fromList getters) sample
 
 -- | Inductive case
 instance
@@ -572,21 +582,8 @@ instance
 -- $convenience
 -- These functions combined the creation of a mutable reference (e.g.
 -- a `System.Metrics.Counter.Counter`) with registering that reference
--- in the store in one convenient function.
---
--- Deregistration actions are not available through these functions.
-
-createGeneric
-  :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
-  => (Metrics.Identifier -> Metrics.Store -> IO (MetricsImpl metricType))
-  -> metrics name metricType tags -- ^ Metric class
-  -> tags -- ^ Tags
-  -> Store metrics -- ^ Metric store
-  -> IO (MetricsImpl metricType)
-createGeneric f _ tags (Store store) =
-  let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name (toTags tags)
-  in  f identifier store
+-- in the store in one convenient function. The deregistration handles
+-- are discarded.
 
 -- | Create and register a zero-initialized counter.
 createCounter
@@ -624,8 +621,81 @@ createDistribution
   -> IO Distribution.Distribution
 createDistribution = createGeneric Metrics.createDistribution
 
+createGeneric
+  :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
+  => (Metrics.Identifier -> Metrics.Store -> IO (MetricsImpl metricType))
+  -> metrics name metricType tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> Store metrics -- ^ Metric store
+  -> IO (MetricsImpl metricType)
+createGeneric f _ tags (Store store) =
+  let name = T.pack $ symbolVal (Proxy @name)
+      identifier = Metrics.Identifier name (toTags tags)
+  in  f identifier store
+
 ------------------------------------------------------------------------
--- ** Predefined metrics
+-- ** Deregistering
+
+-- $deregistering
+-- Deregistration handles are the safest way to deregister metrics,
+-- but you can also deregister metrics with this alternative interface.
+
+-- | Atomically apply a deregistration action to a metrics store.
+deregister
+  :: Store metrics -- ^ Metric store
+  -> Deregistration metrics -- ^ Deregistration action
+  -> IO ()
+deregister (Store store) (Deregistration deregister) =
+    Metrics.deregister store deregister
+
+-- | An action that deregisters one or more metrics from a metric store.
+-- Can only be run by `deregister`.
+newtype Deregistration (metrics :: Symbol -> MetricType -> Type -> Type)
+  = Deregistration Metrics.Deregistration
+
+-- | Combine deregistration actions by running one after the other.
+instance Semigroup (Deregistration metrics) where
+  Deregistration f <> Deregistration g = Deregistration (f <> g)
+
+-- | Deregister a metric with a specific class and tag set.
+deregisterMetric
+  :: forall metrics name metricType tags.
+      (KnownSymbol name, ToTags tags)
+  => metrics name metricType tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> Deregistration metrics
+deregisterMetric _ tags =
+  let name = T.pack $ symbolVal (Proxy @name)
+      identifier = Metrics.Identifier name (toTags tags)
+  in  Deregistration $ Metrics.deregisterMetric identifier
+
+-- | Deregister all the metrics registered to a class.
+deregisterClass
+  :: forall metrics name metricType tags. (KnownSymbol name)
+  => metrics name metricType tags -- ^ Metric class
+  -> Deregistration metrics
+deregisterClass _ =
+  let name = T.pack $ symbolVal (Proxy @name)
+  in  Deregistration $ Metrics.deregisterByName name
+
+------------------------------------------------------------------------
+-- * Sampling metrics
+
+-- $sampling
+-- The metrics register in the store can be sampled together. Sampling
+-- is /not/ atomic. While each metric will be retrieved atomically,
+-- the sample is not an atomic snapshot of the system as a whole. See
+-- 'registerGroup' for an explanation of how to sample a subset of all
+-- metrics atomically.
+
+-- | Sample all metrics. Sampling is /not/ atomic in the sense that
+-- some metrics might have been mutated before they're sampled but
+-- after some other metrics have already been sampled.
+sampleAll :: Store metrics -> IO Metrics.Sample
+sampleAll (Store store) = Metrics.sampleAll store
+
+------------------------------------------------------------------------
+-- * Predefined metrics
 
 -- | Register a number of metrics related to garbage collector
 -- behavior.
@@ -706,61 +776,5 @@ createDistribution = createGeneric Metrics.createDistribution
 -- 1 for a maximally sequential run and approaches the number of
 -- threads (set by the RTS flag @-N@) for a maximally parallel run.
 --
-registerGcMetrics :: Register AllMetrics
-registerGcMetrics = Register Metrics.registerGcMetrics
-
-------------------------------------------------------------------------
--- * Deregistering metrics
-
--- | An action that deregisters metrics from a metric store.
-newtype Deregister (metrics :: Symbol -> MetricType -> Type -> Type)
-  = Deregister Metrics.Deregister
-
-instance Semigroup (Deregister metrics) where
-  Deregister f <> Deregister g = Deregister (f <> g)
-
--- | Atomically apply a deregistration action to a metrics store.
-atomicDeregister
-  :: Store metrics -- ^ Metric store
-  -> Deregister metrics -- ^ Registration action
-  -> IO ()
-atomicDeregister (Store store) (Deregister deregister) =
-    Metrics.atomicDeregister store deregister
-
--- | Deregister a metric of the given class with the given tag set.
-deregister
-  :: forall metrics name metricType tags.
-      (KnownSymbol name, ToTags tags)
-  => metrics name metricType tags -- ^ Metric class
-  -> tags -- ^ Tags
-  -> Deregister metrics -- ^ Deregistration action
-deregister _ tags =
-  let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name (toTags tags)
-  in  Deregister $ Metrics.deregister identifier
-
--- | Deregister all metrics of the given class, irrespective of their
--- tags.
-deregisterClass
-  :: forall metrics name metricType tags. (KnownSymbol name)
-  => metrics name metricType tags -- ^ Metric class
-  -> Deregister metrics -- ^ Deregistration action
-deregisterClass _ =
-  let name = T.pack $ symbolVal (Proxy @name)
-  in  Deregister $ Metrics.deregisterByName name
-
-------------------------------------------------------------------------
--- * Sampling metrics
-
--- $sampling
--- The metrics register in the store can be sampled together. Sampling
--- is /not/ atomic. While each metric will be retrieved atomically,
--- the sample is not an atomic snapshot of the system as a whole. See
--- 'registerGroup' for an explanation of how to sample a subset of all
--- metrics atomically.
-
--- | Sample all metrics. Sampling is /not/ atomic in the sense that
--- some metrics might have been mutated before they're sampled but
--- after some other metrics have already been sampled.
-sampleAll :: Store metrics -> IO Metrics.Sample
-sampleAll (Store store) = Metrics.sampleAll store
+registerGcMetrics :: Registration AllMetrics
+registerGcMetrics = Registration Metrics.registerGcMetrics

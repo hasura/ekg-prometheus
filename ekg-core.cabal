@@ -34,6 +34,7 @@ library
     Data.Atomic
     System.Metrics.Example
     System.Metrics.GroupExample
+    System.Metrics.SimpleExample
     System.Metrics.ThreadId
 
   build-depends:

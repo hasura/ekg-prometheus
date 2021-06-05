@@ -16,16 +16,19 @@ import qualified System.Metrics.Counter as Counter
 import qualified System.Metrics.Gauge as Gauge
 import System.Metrics
 
+-- Custom type describing a set of classes of metrics.
 data MyMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
   Requests ::
     MyMetrics "requests" 'CounterType EndpointTags
   DBConnections ::
     MyMetrics "postgres.total_connections" 'GaugeType DataSourceTags
 
+-- Custom tag set
 newtype EndpointTags = EndpointTags { endpoint :: T.Text }
   deriving (Generic)
 instance ToTags EndpointTags
 
+-- Custom tag set
 data DataSourceTags = DataSourceTags
   { sourceName :: T.Text
   , connInfo :: T.Text

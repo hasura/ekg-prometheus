@@ -27,42 +27,9 @@
 -- * We bind the `Handle`s of "System.Metrics.Internal.State" to
 --   specific `IORef`s in `deregisterHandles`, preventing the confusion of
 --   handles from different `Store`s.
---
---
--- A module for defining metrics that can be monitored.
---
--- Metrics are used to monitor program behavior and performance. All
--- metrics have
---
---  * a name, and
---
---  * a way to get the metric's current value.
---
--- This module provides a way to register metrics in a global \"metric
--- store\". The store can then be used to get a snapshot of all
--- metrics. The store also serves as a central place to keep track of
--- all the program's metrics, both user and library defined.
---
--- Here's an example of creating a single counter, used to count the
--- number of request served by a web server:
---
--- > import System.Metrics
--- > import qualified System.Metrics.Counter as Counter
--- >
--- > main = do
--- >     store <- newStore
--- >     requests <- createCounter "myapp.request_count" store
--- >     -- Every time we receive a request:
--- >     Counter.inc requests
---
--- This module also provides a way to register a number of predefined
--- metrics that are useful in most applications. See e.g.
--- 'registerGcMetrics'.
+
 module System.Metrics.Internal.Store
     (
-      -- * Naming metrics
-      -- $naming
-
       -- * The metric store
       -- $metric-store
       Store
@@ -73,8 +40,8 @@ module System.Metrics.Internal.Store
 
       -- * Registering metrics
       -- $registering
-    , Register
-    , atomicRegister
+    , Registration
+    , register
     , registerCounter
     , registerGauge
     , registerLabel
@@ -93,9 +60,9 @@ module System.Metrics.Internal.Store
     , registerGcMetrics
 
       -- * Deregistering metrics
-    , Deregister
-    , atomicDeregister
+    , Deregistration
     , deregister
+    , deregisterMetric
     , deregisterByName
 
       -- * Sampling metrics
@@ -126,33 +93,8 @@ import qualified System.Metrics.Internal.State as Internal
 import System.Metrics.Label (Label)
 import qualified System.Metrics.Label as Label
 
--- $naming
--- Compound metric names should be separated using underscores.
--- Example: @request_count@. Periods in the name imply namespacing.
--- Example: @\"myapp.users\"@. Some consumers of metrics will use
--- these namespaces to group metrics in e.g. UIs.
---
--- Libraries and frameworks that want to register their own metrics
--- should prefix them with a namespace, to avoid collision with
--- user-defined metrics and metrics defined by other libraries. For
--- example, the Snap web framework could prefix all its metrics with
--- @\"snap.\"@.
---
--- It's customary to suffix the metric name with a short string
--- explaining the metric's type e.g. using @\"_ms\"@ to denote
--- milliseconds.
-
 ------------------------------------------------------------------------
 -- * The metric store
-
--- $metric-store
--- The metric store is a shared store of metrics. It allows several
--- disjoint components (e.g. libraries) to contribute to the set of
--- metrics exposed by an application. Libraries that want to provide a
--- set of metrics should defined a register method, in the style of
--- 'registerGcMetrics', that registers the metrics in the 'Store'. The
--- register function should document which metrics are registered and
--- their types (i.e. counter, gauge, label, or distribution).
 
 -- | A mutable metric store.
 newtype Store = Store { storeState :: IORef State }
@@ -164,32 +106,23 @@ newStore = Store <$> newIORef initialState
 ------------------------------------------------------------------------
 -- * Registering metrics
 
--- $registering
--- Before metrics can be sampled they need to be registered with the
--- metric store. Passing a metric identifier that has already been used
--- to one of the register functions will replace the existing metric.
---
--- Each registration function also returns an IO action that, when run,
--- will deregister the newly registered metric, and only that metric.
--- Indeed, if the registered metric is replaced by another metric, its
--- deregistration action will have no effect on the state of the store.
+-- | An action that registers one or more metrics to a metric store.
+newtype Registration =
+  Registration (State -> (State, [Handle] -> [Handle]))
 
--- | An action that registers metrics to a metric store.
-newtype Register = Register (State -> (State, [Handle] -> [Handle]))
-
-instance Semigroup Register where
-  Register f <> Register g = Register $ \state0 ->
+instance Semigroup Registration where
+  Registration f <> Registration g = Registration $ \state0 ->
     let (state1, h1) = f state0
         (state2, h2) = g state1
     in  (state2, h2 . h1)
 
 -- | Atomically apply a registration action to a metrics store. Returns
--- an action to (atomically) deregister the newly registered metrics.
-atomicRegister
+-- an action to (atomically) deregisterMetric the newly registered metrics.
+register
   :: Store -- ^ Metric store
-  -> Register -- ^ Registration action
+  -> Registration -- ^ Registration action
   -> IO (IO ()) -- ^ Deregistration action
-atomicRegister (Store stateRef) (Register f) =
+register (Store stateRef) (Registration f) =
     atomicModifyIORef' stateRef $ \state0 ->
         let (state1, handles') = f state0
             deregisterAction = deregisterHandles (handles' []) stateRef
@@ -209,7 +142,7 @@ deregisterHandles handles stateRef =
 -- Also see 'createCounter'.
 registerCounter :: Identifier -- ^ Counter identifier
                 -> IO Int64   -- ^ Action to read the current metric value
-                -> Register -- ^ Registration action
+                -> Registration -- ^ Registration action
 registerCounter identifier sample =
     registerGeneric identifier (CounterS sample)
 
@@ -217,7 +150,7 @@ registerCounter identifier sample =
 -- the value must be thread-safe. Also see 'createGauge'.
 registerGauge :: Identifier -- ^ Gauge identifier
               -> IO Int64   -- ^ Action to read the current metric value
-              -> Register -- ^ Registration action
+              -> Registration -- ^ Registration action
 registerGauge identifier sample =
     registerGeneric identifier (GaugeS sample)
 
@@ -225,7 +158,7 @@ registerGauge identifier sample =
 -- must be thread-safe. Also see 'createLabel'.
 registerLabel :: Identifier -- ^ Label identifier
               -> IO T.Text  -- ^ Action to read the current metric value
-              -> Register -- ^ Registration action
+              -> Registration -- ^ Registration action
 registerLabel identifier sample =
     registerGeneric identifier (LabelS sample)
 
@@ -234,15 +167,15 @@ registerLabel identifier sample =
 registerDistribution
     :: Identifier             -- ^ Distribution identifier
     -> IO Distribution.Stats  -- ^ Action to read the current metric
-    -> Register -- ^ Registration action
+    -> Registration -- ^ Registration action
 registerDistribution identifier sample =
     registerGeneric identifier (DistributionS sample)
 
 registerGeneric
   :: Identifier -- ^ Metric identifier
   -> MetricSampler -- ^ Sampling action
-  -> Register -- ^ Registration action
-registerGeneric identifier sample = Register $ \state0 ->
+  -> Registration -- ^ Registration action
+registerGeneric identifier sample = Registration $ \state0 ->
     let (state1, handle) = Internal.register identifier sample state0
     in  (state1, (:) handle)
 
@@ -293,8 +226,8 @@ registerGroup
     :: M.HashMap Identifier
        (a -> Value)  -- ^ Metric names and getter functions.
     -> IO a          -- ^ Action to sample the metric group
-    -> Register -- ^ Registration action
-registerGroup getters cb = Register $ \state0 ->
+    -> Registration -- ^ Registration action
+registerGroup getters cb = Registration $ \state0 ->
     let (state1, handles) = Internal.registerGroup getters cb state0
     in  (state1, (++) handles)
 
@@ -314,7 +247,7 @@ createCounter :: Identifier -- ^ Counter identifier
               -> IO Counter
 createCounter identifier store = do
     counter <- Counter.new
-    _ <- atomicRegister store $
+    _ <- register store $
           registerCounter identifier (Counter.read counter)
     return counter
 
@@ -324,7 +257,7 @@ createGauge :: Identifier -- ^ Gauge identifier
             -> IO Gauge
 createGauge identifier store = do
     gauge <- Gauge.new
-    _ <- atomicRegister store $
+    _ <- register store $
           registerGauge identifier (Gauge.read gauge)
     return gauge
 
@@ -334,7 +267,7 @@ createLabel :: Identifier -- ^ Label identifier
             -> IO Label
 createLabel identifier store = do
     label <- Label.new
-    _ <- atomicRegister store $
+    _ <- register store $
           registerLabel identifier (Label.read label)
     return label
 
@@ -344,7 +277,7 @@ createDistribution :: Identifier -- ^ Distribution identifier
                    -> IO Distribution
 createDistribution identifier store = do
     event <- Distribution.new
-    _ <- atomicRegister store $
+    _ <- register store $
           registerDistribution identifier (Distribution.read event)
     return event
 
@@ -445,7 +378,7 @@ sToMs s = round (s * 1000.0)
 -- 1 for a maximally sequential run and approaches the number of
 -- threads (set by the RTS flag @-N@) for a maximally parallel run.
 --
-registerGcMetrics :: Register
+registerGcMetrics :: Registration
 registerGcMetrics =
     let taglessId :: T.Text -> Identifier
         taglessId name = Identifier name mempty in
@@ -610,41 +543,35 @@ gcParTotBytesCopied = Stats.parAvgBytesCopied
 -- * Deregistering metrics
 
 -- | An action that deregisters metrics from a metric store.
-newtype Deregister = Deregister (State -> State)
+newtype Deregistration = Deregistration (State -> State)
 
-instance Semigroup Deregister where
-  Deregister f <> Deregister g = Deregister (g . f)
+instance Semigroup Deregistration where
+  Deregistration f <> Deregistration g = Deregistration (g . f)
 
 -- | Atomically apply a deregistration action to a metrics store.
-atomicDeregister
+deregister
   :: Store -- ^ Metric store
-  -> Deregister -- ^ Registration action
+  -> Deregistration -- ^ Deregistration action
   -> IO ()
-atomicDeregister (Store stateRef) (Deregister f) =
+deregister (Store stateRef) (Deregistration f) =
     atomicModifyIORef' stateRef $ \state -> (f state, ())
 
 -- | Deregister a metric (of any type).
-deregister
+deregisterMetric
   :: Identifier -- ^ Metric identifier
-  -> Deregister -- ^ Deregistration action
-deregister identifier = Deregister $ Internal.deregister identifier
+  -> Deregistration
+deregisterMetric identifier =
+  Deregistration $ Internal.deregister identifier
 
 -- | Deregister all metrics (of any type) with the given name, that is,
 -- irrespective of their tags.
 deregisterByName
   :: T.Text -- ^ Metric name
-  -> Deregister -- ^ Deregistration action
-deregisterByName name = Deregister $ Internal.deregisterByName name
+  -> Deregistration
+deregisterByName name = Deregistration $ Internal.deregisterByName name
 
 ------------------------------------------------------------------------
 -- * Sampling metrics
-
--- $sampling
--- The metrics register in the store can be sampled together. Sampling
--- is /not/ atomic. While each metric will be retrieved atomically,
--- the sample is not an atomic snapshot of the system as a whole. See
--- 'registerGroup' for an explanation of how to sample a subset of all
--- metrics atomically.
 
 -- | Sample all metrics. Sampling is /not/ atomic in the sense that
 -- some metrics might have been mutated before they're sampled but
