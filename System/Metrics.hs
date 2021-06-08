@@ -416,6 +416,9 @@ newtype Registration (metric :: Symbol -> MetricType -> Type -> Type)
 instance Semigroup (Registration metrics) where
   Registration f <> Registration g = Registration (f <> g)
 
+instance Monoid (Registration metrics) where
+  mempty = Registration mempty
+
 -- | Register a non-negative, monotonically increasing, integer-valued
 -- metric. The provided action to read the value must be thread-safe.
 -- Also see 'createCounter'.
@@ -660,6 +663,9 @@ newtype Deregistration (metrics :: Symbol -> MetricType -> Type -> Type)
 -- | Combine deregistration actions by running one after the other.
 instance Semigroup (Deregistration metrics) where
   Deregistration f <> Deregistration g = Deregistration (f <> g)
+
+instance Monoid (Deregistration metrics) where
+  mempty = Deregistration mempty
 
 -- | Deregister a metric with a specific class and tag set.
 deregisterMetric

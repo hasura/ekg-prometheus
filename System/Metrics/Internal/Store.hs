@@ -112,6 +112,9 @@ instance Semigroup Registration where
         (state2, h2) = g state1
     in  (state2, h2 . h1)
 
+instance Monoid Registration where
+  mempty = Registration $ \state -> (state, id)
+
 -- | Atomically apply a registration action to a metrics store. Returns
 -- an action to (atomically) deregisterMetric the newly registered metrics.
 register
@@ -285,6 +288,9 @@ newtype Deregistration = Deregistration (State -> State)
 
 instance Semigroup Deregistration where
   Deregistration f <> Deregistration g = Deregistration (g . f)
+
+instance Monoid Deregistration where
+  mempty = Deregistration id
 
 -- | Atomically apply a deregistration action to a metrics store.
 deregister
