@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE EmptyCase #-}
@@ -7,6 +8,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -126,6 +128,7 @@ module System.Metrics
     -- * Predefined metrics
     -- $predefined
   , registerGcMetrics
+  , GcMetrics (..)
   ) where
 
 import Data.Coerce (coerce)
@@ -135,6 +138,7 @@ import Data.Kind (Type)
 import Data.Proxy
 import qualified Data.Text as T
 import GHC.Generics
+import qualified GHC.Stats as Stats
 import GHC.TypeLits
 import qualified System.Metrics.Counter as Counter
 import qualified System.Metrics.Distribution as Distribution
@@ -697,6 +701,10 @@ sampleAll (Store store) = Metrics.sampleAll store
 ------------------------------------------------------------------------
 -- * Predefined metrics
 
+-- | Convert nanoseconds to milliseconds.
+nsToMs :: Int64 -> Int64
+nsToMs s = round (realToFrac s / (1000000.0 :: Double))
+
 -- | Register a number of metrics related to garbage collector
 -- behavior.
 --
@@ -711,70 +719,146 @@ sampleAll (Store store) = Metrics.sampleAll store
 -- The runtime overhead of @-T@ is very small so it's safe to always
 -- leave it enabled.
 --
--- Registered counters:
---
--- [@rts.gc.bytes_allocated@] Total number of bytes allocated
---
--- [@rts.gc.num_gcs@] Number of garbage collections performed
---
--- [@rts.gc.num_bytes_usage_samples@] Number of byte usage samples taken
---
--- [@rts.gc.cumulative_bytes_used@] Sum of all byte usage samples, can be
--- used with @numByteUsageSamples@ to calculate averages with
--- arbitrary weighting (if you are sampling this record multiple
--- times).
---
--- [@rts.gc.bytes_copied@] Number of bytes copied during GC
---
--- [@rts.gc.init_cpu_ms@] CPU time used by the init phase, in
--- milliseconds. GHC 8.6+ only.
---
--- [@rts.gc.init_wall_ms@] Wall clock time spent running the init
--- phase, in milliseconds. GHC 8.6+ only.
---
--- [@rts.gc.mutator_cpu_ms@] CPU time spent running mutator threads,
--- in milliseconds. This does not include any profiling overhead or
--- initialization.
---
--- [@rts.gc.mutator_wall_ms@] Wall clock time spent running mutator
--- threads, in milliseconds. This does not include initialization.
---
--- [@rts.gc.gc_cpu_ms@] CPU time spent running GC, in milliseconds.
---
--- [@rts.gc.gc_wall_ms@] Wall clock time spent running GC, in
--- milliseconds.
---
--- [@rts.gc.cpu_ms@] Total CPU time elapsed since program start, in
--- milliseconds.
---
--- [@rts.gc.wall_ms@] Total wall clock time elapsed since start, in
--- milliseconds.
---
--- Registered gauges:
---
--- [@rts.gc.max_bytes_used@] Maximum number of live bytes seen so far
---
--- [@rts.gc.current_bytes_used@] Current number of live bytes
---
--- [@rts.gc.current_bytes_slop@] Current number of bytes lost to slop
---
--- [@rts.gc.max_bytes_slop@] Maximum number of bytes lost to slop at any one time so far
---
--- [@rts.gc.peak_megabytes_allocated@] Maximum number of megabytes allocated
---
--- [@rts.gc.par_tot_bytes_copied@] Number of bytes copied during GC, minus
--- space held by mutable lists held by the capabilities.  Can be used
--- with 'parMaxBytesCopied' to determine how well parallel GC utilized
--- all cores.
---
--- [@rts.gc.par_avg_bytes_copied@] Deprecated alias for
--- @par_tot_bytes_copied@.
---
--- [@rts.gc.par_max_bytes_copied@] Sum of number of bytes copied each GC by
--- the most active GC thread each GC. The ratio of
--- @par_tot_bytes_copied@ divided by @par_max_bytes_copied@ approaches
--- 1 for a maximally sequential run and approaches the number of
--- threads (set by the RTS flag @-N@) for a maximally parallel run.
---
-registerGcMetrics :: Registration AllMetrics
-registerGcMetrics = Registration Metrics.registerGcMetrics
+registerGcMetrics :: Registration GcMetrics
+registerGcMetrics = registerGroup samplingGroup getRTSStats
+  where
+  samplingGroup = SamplingGroup
+    :> (BytesAllocated, (), fromIntegral . Stats.allocated_bytes)
+    :> (NumGcs, (), fromIntegral . Stats.gcs)
+    :> (NumBytesUsageSamples, (), fromIntegral . Stats.major_gcs)
+    :> (CumulativeBytesUsed, (), fromIntegral . Stats.cumulative_live_bytes)
+    :> (BytesCopied, (), fromIntegral . Stats.copied_bytes)
+#if MIN_VERSION_base(4,12,0)
+    :> (InitCpuMs, (), nsToMs . Stats.init_cpu_ns)
+    :> (InitWallMs, (), nsToMs . Stats.init_elapsed_ns)
+#endif
+    :> (MutatorCpuMs, (), nsToMs . Stats.mutator_cpu_ns)
+    :> (MutatorWallMs, (), nsToMs . Stats.mutator_elapsed_ns)
+    :> (GcCpuMs, (), nsToMs . Stats.gc_cpu_ns)
+    :> (GcWallMs, (), nsToMs . Stats.gc_elapsed_ns)
+    :> (CpuMs, (), nsToMs . Stats.cpu_ns)
+    :> (WallMs, (), nsToMs . Stats.elapsed_ns)
+    :> (MaxBytesUsed, (), fromIntegral . Stats.max_live_bytes)
+    :> (CurrentBytesUsed, (), fromIntegral . Stats.gcdetails_live_bytes . Stats.gc)
+    :> (CurrentBytesSlop, (), fromIntegral . Stats.gcdetails_slop_bytes . Stats.gc)
+    :> (MaxBytesSlop, (), fromIntegral . Stats.max_slop_bytes)
+    :> (PeakMegabytesAllocated, (), fromIntegral . (`quot` (1024*1024)) . Stats.max_mem_in_use_bytes)
+    :> (ParTotBytesCopied, (), fromIntegral . Stats.par_copied_bytes)
+    :> (ParMaxBytesCopied, (), fromIntegral . Stats.cumulative_par_max_copied_bytes)
+
+-- | Get RTS statistics.
+getRTSStats :: IO Stats.RTSStats
+getRTSStats = do
+    enabled <- Stats.getRTSStatsEnabled
+    if enabled
+        then Stats.getRTSStats
+        else return emptyRTSStats
+
+-- | Empty RTS statistics, as if the application hasn't started yet.
+emptyRTSStats :: Stats.RTSStats
+emptyRTSStats = Stats.RTSStats
+    { gcs                                  = 0
+    , major_gcs                            = 0
+    , allocated_bytes                      = 0
+    , max_live_bytes                       = 0
+    , max_large_objects_bytes              = 0
+    , max_compact_bytes                    = 0
+    , max_slop_bytes                       = 0
+    , max_mem_in_use_bytes                 = 0
+    , cumulative_live_bytes                = 0
+    , copied_bytes                         = 0
+    , par_copied_bytes                     = 0
+    , cumulative_par_max_copied_bytes      = 0
+#if MIN_VERSION_base(4,11,0)
+    , cumulative_par_balanced_copied_bytes = 0
+#if MIN_VERSION_base(4,12,0)
+    , init_cpu_ns                          = 0
+    , init_elapsed_ns                      = 0
+#endif
+#endif
+    , mutator_cpu_ns                       = 0
+    , mutator_elapsed_ns                   = 0
+    , gc_cpu_ns                            = 0
+    , gc_elapsed_ns                        = 0
+    , cpu_ns                               = 0
+    , elapsed_ns                           = 0
+    , gc                                   = emptyGCDetails
+    }
+
+emptyGCDetails :: Stats.GCDetails
+emptyGCDetails = Stats.GCDetails
+    { gcdetails_gen                       = 0
+    , gcdetails_threads                   = 0
+    , gcdetails_allocated_bytes           = 0
+    , gcdetails_live_bytes                = 0
+    , gcdetails_large_objects_bytes       = 0
+    , gcdetails_compact_bytes             = 0
+    , gcdetails_slop_bytes                = 0
+    , gcdetails_mem_in_use_bytes          = 0
+    , gcdetails_copied_bytes              = 0
+    , gcdetails_par_max_copied_bytes      = 0
+#if MIN_VERSION_base(4,11,0)
+    , gcdetails_par_balanced_copied_bytes = 0
+#endif
+    , gcdetails_sync_elapsed_ns           = 0
+    , gcdetails_cpu_ns                    = 0
+    , gcdetails_elapsed_ns                = 0
+    }
+
+-- | Specification of the metrics registered by `registerGcMetrics`.
+data GcMetrics :: Symbol -> MetricType -> Type -> Type where
+  -- [Counters]
+
+  -- | Total number of bytes allocated
+  BytesAllocated :: GcMetrics "rts.gc.bytes_allocated" 'CounterType ()
+  -- | Number of garbage collections performed
+  NumGcs :: GcMetrics "rts.gc.num_gcs" 'CounterType ()
+  -- | Number of byte usage samples taken
+  NumBytesUsageSamples :: GcMetrics "rts.gc.num_bytes_usage_samples" 'CounterType ()
+  -- | Sum of all byte usage samples, can be used with
+  -- @num_bytes_usage_samples@ to calculate averages with arbitrary weighting
+  -- (if you are sampling this record multiple times).
+  CumulativeBytesUsed :: GcMetrics "rts.gc.cumulative_bytes_used" 'CounterType ()
+  -- | Number of bytes copied during GC
+  BytesCopied :: GcMetrics "rts.gc.bytes_copied" 'CounterType ()
+#if MIN_VERSION_base(4,12,0)
+  -- | CPU time used by the init phase, in milliseconds. GHC 8.6+ only.
+  InitCpuMs :: GcMetrics "rts.gc.init_cpu_ms" 'CounterType ()
+  -- | Wall clock time spent running the init phase, in milliseconds. GHC 8.6+
+  -- only.
+  InitWallMs :: GcMetrics "rts.gc.init_wall_ms" 'CounterType ()
+#endif
+  -- | CPU time spent running mutator threads, in milliseconds. This does not
+  -- include any profiling overhead or initialization.
+  MutatorCpuMs :: GcMetrics "rts.gc.mutator_cpu_ms" 'CounterType ()
+  -- | Wall clock time spent running mutator threads, in milliseconds. This
+  -- does not include initialization.
+  MutatorWallMs :: GcMetrics "rts.gc.mutator_wall_ms" 'CounterType ()
+  -- | CPU time spent running GC, in milliseconds.
+  GcCpuMs :: GcMetrics "rts.gc.gc_cpu_ms" 'CounterType ()
+  -- | Wall clock time spent running GC, in milliseconds.
+  GcWallMs :: GcMetrics "rts.gc.gc_wall_ms" 'CounterType ()
+  -- | Total CPU time elapsed since program start, in milliseconds.
+  CpuMs :: GcMetrics "rts.gc.cpu_ms" 'CounterType ()
+  -- | Total wall clock time elapsed since start, in milliseconds.
+  WallMs :: GcMetrics "rts.gc.wall_ms" 'CounterType ()
+
+  -- [Gauges]
+
+  -- | Maximum number of live bytes seen so far
+  MaxBytesUsed :: GcMetrics "rts.gc.max_bytes_used" 'GaugeType ()
+  -- | Current number of live bytes
+  CurrentBytesUsed :: GcMetrics "rts.gc.current_bytes_used" 'GaugeType ()
+  -- | Current number of bytes lost to slop
+  CurrentBytesSlop :: GcMetrics "rts.gc.current_bytes_slop" 'GaugeType ()
+  -- | Maximum number of bytes lost to slop at any one time so far
+  MaxBytesSlop :: GcMetrics "rts.gc.max_bytes_slop" 'GaugeType ()
+  -- | Maximum number of megabytes allocated
+  PeakMegabytesAllocated :: GcMetrics "rts.gc.peak_megabytes_allocated" 'GaugeType ()
+  -- | Number of bytes copied during GC, minus space held by mutable lists held by the capabilities.  Can be used with 'parMaxBytesCopied' to determine how well parallel GC utilized all cores.
+  ParTotBytesCopied :: GcMetrics "rts.gc.par_tot_bytes_copied" 'GaugeType ()
+  -- | Sum of number of bytes copied each GC by the most active GC thread each
+  -- GC. The ratio of @par_tot_bytes_copied@ divided by @par_max_bytes_copied@
+  -- approaches 1 for a maximally sequential run and approaches the number of
+  -- threads (set by the RTS flag @-N@) for a maximally parallel run.
+  ParMaxBytesCopied :: GcMetrics "rts.gc.par_max_bytes_copied" 'GaugeType ()
