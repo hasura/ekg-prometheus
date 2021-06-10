@@ -24,11 +24,14 @@ module System.Metrics.Internal.State
       -- * State verification
     , verifyState
 
-      -- * State operations
-      -- TODO: Think about order of presentation
+      -- * Core operations
+      -- $core-operations
     , register
     , registerGroup
     , deregister
+
+      -- * Derived operations
+      -- $derived-operations
     , Handle
     , deregisterByHandle
     , deregisterByHandles
@@ -182,14 +185,17 @@ checkNextGroupId State{..} =
 -- `stateNextMetricVersion` must be greater than the metric versions of
 -- all existing metrics.
 checkNextMetricVersion :: State -> Bool
-checkNextMetricVersion State{..}
-  | null metricVersions = True
-  | otherwise = maximum metricVersions < stateNextMetricVersion
-  where
-    metricVersions = map snd $ M.elems stateMetrics
+checkNextMetricVersion State{..} =
+    let versions = map snd $ M.elems stateMetrics
+    in  all (< stateNextMetricVersion) versions
 
 ------------------------------------------------------------------------
--- * State operations
+-- * Core operations
+
+-- $core-operations
+-- These "core" operations represent the complete set of ways in which
+-- the `State` may be modified. We must make sure that these ops
+-- maintain the `State` invariants.
 
 -- | Deregister the metric at the given identifier. When no metric is
 -- registered at the identifier, the original state is returned.
@@ -200,21 +206,16 @@ deregister
 deregister identifier state@State{..} =
     case M.lookup identifier stateMetrics of
         Nothing -> state
-        Just (Left _, _) -> State
+        Just (Left _, _) -> state
             { stateMetrics = M.delete identifier stateMetrics
-            , stateGroups = stateGroups
-            , stateNextGroupId = stateNextGroupId
-            , stateNextMetricVersion = stateNextMetricVersion
             }
-        Just (Right groupID, _) -> State
+        Just (Right groupID, _) -> state
             { stateMetrics = M.delete identifier stateMetrics
             , stateGroups =
                 let delete_ = overGroupSamplerMetrics $ \hm ->
                         let hm' = M.delete identifier hm
                         in  if M.null hm' then Nothing else Just hm'
                 in  IM.update delete_ groupID stateGroups
-            , stateNextGroupId = stateNextGroupId
-            , stateNextMetricVersion = stateNextMetricVersion
             }
 
 overGroupSamplerMetrics ::
@@ -229,30 +230,6 @@ overGroupSamplerMetrics f GroupSampler{..} =
           , groupSamplerMetrics = groupSamplerMetrics'
           }
 
--- | A reference to a particular version of the metric at an identifier.
---
--- A value of this type should never be exposed in order to prevent it
--- from being applied to the wrong `State`.
-data Handle = Handle Identifier Version
-
--- | Deregister the particular metric referenced by the handle. That is,
--- deregister the metric at the given identifier, but only if its
--- version matches that held by the `Handle`.
-deregisterByHandle :: Handle -> State -> State
-deregisterByHandle (Handle identifier version) state =
-    case M.lookup identifier (stateMetrics state) of
-        Nothing -> state
-        Just (_, version') ->
-            if version == version' then
-                deregister identifier state
-            else
-                state
-
--- | Deregisters each of the given handles. See `deregisterByHandle`.
-deregisterByHandles :: [Handle] -> State -> State
-deregisterByHandles handles state =
-  foldl' (flip deregisterByHandle) state handles
-
 -- | Register a metric at the given identifier. If the identifier is
 -- already in use by an existing metric, the existing metric is first
 -- removed. Returns a handle for deregistering the registered metric.
@@ -266,19 +243,17 @@ register identifier sample =
 
 insertMetricSampler
   :: Identifier -> MetricSampler -> State -> (State, Handle)
-insertMetricSampler identifier sampler State{..} =
-  let state = State
+insertMetricSampler identifier sampler state0@State{..} =
+  let state1 = state0
         { stateMetrics =
             M.insert
               identifier
               (Left sampler, stateNextMetricVersion)
               stateMetrics
-        , stateGroups = stateGroups
-        , stateNextGroupId = stateNextGroupId
         , stateNextMetricVersion = stateNextMetricVersion + 1
         }
       handle = Handle identifier stateNextMetricVersion
-  in  (state, handle)
+  in  (state1, handle)
 
 -- | Register a group of metrics sharing a common sampling action. If
 -- any of the given identifiers are in use by an existing metric, the
@@ -300,39 +275,69 @@ insertGroup
     -> IO a          -- ^ Action to sample the metric group
     -> State
     -> (State, [Handle])
-insertGroup getters cb state
-  | M.null getters = (state, [])
+insertGroup getters cb state0
+  | M.null getters = (state0, [])
   | otherwise =
-      let (state', groupId) = insertGroup' state
-      in  mapAccumL (insertGroupReference groupId) state' $ M.keys getters
-  where
-    insertGroup' :: State -> (State, GroupId)
-    insertGroup' State{..} =
-      let state' = State
-            { stateMetrics = stateMetrics
-            , stateGroups =
-                IM.insert
-                  stateNextGroupId (GroupSampler cb getters) stateGroups
-            , stateNextGroupId = stateNextGroupId + 1
-            , stateNextMetricVersion = stateNextMetricVersion
-            }
-      in  (state', stateNextGroupId)
+      let (state1, groupId) =
+            insertGroupSampler (GroupSampler cb getters) state0
+      in  mapAccumL (insertGroupReference groupId) state1 $ M.keys getters
 
-    insertGroupReference
-      :: GroupId -> State -> Identifier -> (State, Handle)
-    insertGroupReference groupId State{..} identifier =
-      let state' = State
-            { stateMetrics =
-                M.insert
-                  identifier
-                  (Right groupId, stateNextMetricVersion)
-                  stateMetrics
-            , stateGroups = stateGroups
-            , stateNextGroupId = stateNextGroupId
-            , stateNextMetricVersion = stateNextMetricVersion + 1
-            }
-          handle = Handle identifier stateNextMetricVersion
-      in  (state', handle)
+insertGroupSampler :: GroupSampler -> State -> (State, GroupId)
+insertGroupSampler groupSampler state0@State{..} =
+  let state1 = state0
+        { stateGroups =
+            IM.insert stateNextGroupId groupSampler stateGroups
+        , stateNextGroupId = stateNextGroupId + 1
+        }
+  in  (state1, stateNextGroupId)
+
+insertGroupReference
+  :: GroupId -> State -> Identifier -> (State, Handle)
+insertGroupReference groupId state0@State{..} identifier =
+  let state1 = state0
+        { stateMetrics =
+            M.insert
+              identifier
+              (Right groupId, stateNextMetricVersion)
+              stateMetrics
+        , stateNextMetricVersion = stateNextMetricVersion + 1
+        }
+      handle = Handle identifier stateNextMetricVersion
+  in  (state1, handle)
+
+------------------------------------------------------------------------
+-- * Derived operations
+
+-- $derived-operations
+-- These "derived" operations must only make modifications to the
+-- `State` through the "core" operations. This is so that we can deduce
+-- that the derived ops preserve the `State` invariants as long as the
+-- core ops do.
+
+-- | A reference to a particular version of the metric at an identifier.
+--
+-- A value of this type should never be exposed in order to prevent it
+-- from being applied to the wrong `State`.
+data Handle = Handle Identifier Version
+
+-- | Deregister the particular metric referenced by the handle. That is,
+-- deregister the metric at the given identifier, but only if its
+-- version matches that held by the `Handle`.
+deregisterByHandle :: Handle -> State -> State
+deregisterByHandle (Handle identifier version) state =
+    case M.lookup identifier (stateMetrics state) of
+        Nothing -> state
+        Just (_, version') ->
+            if version == version' then
+                deregister identifier state
+            else
+                state
+
+-- | A convenience function for deregistering a list of handles. See
+-- `deregisterByHandle`.
+deregisterByHandles :: [Handle] -> State -> State
+deregisterByHandles handles state =
+  foldl' (flip deregisterByHandle) state handles
 
 -- | Deregister all metrics (of any type) with the given name, ignoring
 -- tags.
@@ -341,7 +346,7 @@ deregisterByName
     -> State
     -> State
 deregisterByName name state =
-    let identifiers = -- to be removed
+    let identifiers = -- Identifiers to be removed
           filter (\i -> name == idName i) $ M.keys $ stateMetrics state
     in  foldl' (flip deregister) state identifiers
 

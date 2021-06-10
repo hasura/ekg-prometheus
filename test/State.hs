@@ -62,7 +62,6 @@ data TestStateOp
   = Register Identifier
   | RegisterGroup (M.HashMap Identifier (() -> Value))
   | Deregister Identifier
-  | DeregisterByName T.Text
 
 -- | Realize the state operations (using phony sampling actions).
 runTestStateOp :: TestStateOp -> State -> State
@@ -70,20 +69,17 @@ runTestStateOp op = case op of
   Register identifier -> fst . register identifier (CounterS (pure 0))
   RegisterGroup group -> fst . registerGroup group (pure ())
   Deregister identifier -> deregister identifier
-  DeregisterByName name -> deregisterByName name
 
 instance Show TestStateOp where
   show (Register id') = "Register (" ++ show id' ++ ")"
   show (RegisterGroup idGroup) = "RegisterGroup " ++ show (M.keys idGroup)
   show (Deregister id') = "Deregister (" ++ show id' ++ ")"
-  show (DeregisterByName name) = "DeregisterByName " ++ show name
 
 instance (Monad m) => SC.Serial m TestStateOp where
   series = asum
     [ Register <$> choose identifiers
     , RegisterGroup <$> choose samplingGroups
     , Deregister <$> choose identifiers
-    , DeregisterByName <$> choose names
     ]
     where
       choose :: (Alternative f) => [a] -> f a
@@ -96,7 +92,6 @@ instance QC.Arbitrary TestStateOp where
     [ (4, Register <$> QC.elements identifiers)
     , (4, RegisterGroup <$> QC.elements samplingGroups)
     , (2, Deregister <$> QC.elements identifiers)
-    , (1, DeregisterByName <$> QC.elements names)
     ]
 
 ------------------------------------------------------------------------
