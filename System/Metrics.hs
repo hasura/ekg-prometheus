@@ -788,6 +788,14 @@ emptyRTSStats = Stats.RTSStats
     , gc_elapsed_ns                        = 0
     , cpu_ns                               = 0
     , elapsed_ns                           = 0
+#if MIN_VERSION_base(4,14,1)
+    , nonmoving_gc_sync_cpu_ns             = 0
+    , nonmoving_gc_sync_elapsed_ns         = 0
+    , nonmoving_gc_sync_max_elapsed_ns     = 0
+    , nonmoving_gc_cpu_ns                  = 0
+    , nonmoving_gc_elapsed_ns              = 0
+    , nonmoving_gc_max_elapsed_ns          = 0
+#endif
     , gc                                   = emptyGCDetails
     }
 
@@ -809,6 +817,10 @@ emptyGCDetails = Stats.GCDetails
     , gcdetails_sync_elapsed_ns           = 0
     , gcdetails_cpu_ns                    = 0
     , gcdetails_elapsed_ns                = 0
+#if MIN_VERSION_base(4,14,1)
+    , gcdetails_nonmoving_gc_sync_cpu_ns  = 0
+    , gcdetails_nonmoving_gc_sync_elapsed_ns = 0
+#endif
     }
 
 -- | Specification of the metrics registered by `registerGcMetrics`.
