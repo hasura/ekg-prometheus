@@ -173,49 +173,6 @@ registerGeneric identifier sample = Registration $ \state0 ->
     let (state1, handle) = Internal.register identifier sample state0
     in  (state1, (:) handle)
 
--- | Register an action that will be executed any time one of the
--- metrics computed from the value it returns needs to be sampled.
---
--- When one or more of the metrics listed in the first argument needs
--- to be sampled, the action is executed and the provided getter
--- functions will be used to extract the metric(s) from the action's
--- return value.
---
--- The registered action might be called from a different thread and
--- therefore needs to be thread-safe.
---
--- This function allows you to sample groups of metrics together. This
--- is useful if
---
--- * you need a consistent view of several metric or
---
--- * sampling the metrics together is more efficient.
---
--- For example, sampling GC statistics needs to be done atomically or
--- a GC might strike in the middle of sampling, rendering the values
--- incoherent. Sampling GC statistics is also more efficient if done
--- in \"bulk\", as the run-time system provides a function to sample all
--- GC statistics at once.
---
--- Note that sampling of the metrics is only atomic if the provided
--- action computes @a@ atomically (e.g. if @a@ is a record, the action
--- needs to compute its fields atomically if the sampling is to be
--- atomic.)
---
--- Example usage:
---
--- > {-# LANGUAGE OverloadedStrings #-}
--- > import qualified Data.HashMap.Strict as M
--- > import GHC.Stats
--- > import System.Metrics
--- >
--- > main = do
--- >     store <- newStore
--- >     let metrics =
--- >             [ ("num_gcs", Counter . numGcs)
--- >             , ("max_bytes_used", Gauge . maxBytesUsed)
--- >             ]
--- >     registerGroup (M.fromList metrics) getGCStats store
 registerGroup
     :: M.HashMap Identifier
        (a -> Value)  -- ^ Metric names and getter functions.
@@ -230,10 +187,9 @@ registerGroup getters cb = Registration $ \state0 ->
 
 -- $convenience
 -- These functions combined the creation of a mutable reference (e.g.
--- a 'Counter') with registering that reference in the store in one
--- convenient function.
---
--- Deregistration actions are not available through these functions.
+-- a `System.Metrics.Counter.Counter`) with registering that reference
+-- in the store in one convenient function. The deregistration handles
+-- are discarded.
 
 -- | Create and register a zero-initialized counter.
 createCounter :: Identifier -- ^ Counter identifier

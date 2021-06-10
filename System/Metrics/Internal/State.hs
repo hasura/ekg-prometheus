@@ -3,8 +3,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
--- |
--- This module defines the internal state of the metrics store and all
+-- | This module defines the internal state of the metrics store and all
 -- operations on it.
 --
 -- = Warning
@@ -34,7 +33,6 @@ module System.Metrics.Internal.State
       -- $derived-operations
     , Handle
     , deregisterByHandle
-    , deregisterByHandles
     , deregisterByName
 
       -- * Sampling metrics
@@ -203,19 +201,19 @@ deregister
     :: Identifier -- ^ Metric identifier
     -> State
     -> State
-deregister identifier state@State{..} =
-    case HM.lookup identifier stateMetrics of
+deregister identifier state =
+    case HM.lookup identifier (stateMetrics state) of
         Nothing -> state
         Just (Left _, _) -> state
-            { stateMetrics = HM.delete identifier stateMetrics
+            { stateMetrics = HM.delete identifier $ stateMetrics state
             }
         Just (Right groupID, _) -> state
-            { stateMetrics = HM.delete identifier stateMetrics
+            { stateMetrics = HM.delete identifier $ stateMetrics state
             , stateGroups =
                 let delete_ = overGroupSamplerMetrics $ \hm ->
                         let hm' = HM.delete identifier hm
                         in  if HM.null hm' then Nothing else Just hm'
-                in  M.update delete_ groupID stateGroups
+                in  M.update delete_ groupID $ stateGroups state
             }
 
 overGroupSamplerMetrics ::
@@ -243,16 +241,17 @@ register identifier sample =
 
 insertMetricSampler
   :: Identifier -> MetricSampler -> State -> (State, Handle)
-insertMetricSampler identifier sampler state0@State{..} =
-  let state1 = state0
+insertMetricSampler identifier sampler state0 =
+  let stateNextMetricVersion0 = stateNextMetricVersion state0
+      state1 = state0
         { stateMetrics =
             HM.insert
               identifier
-              (Left sampler, stateNextMetricVersion)
-              stateMetrics
-        , stateNextMetricVersion = stateNextMetricVersion + 1
+              (Left sampler, stateNextMetricVersion0)
+              (stateMetrics state0)
+        , stateNextMetricVersion = stateNextMetricVersion0 + 1
         }
-      handle = Handle identifier stateNextMetricVersion
+      handle = Handle identifier stateNextMetricVersion0
   in  (state1, handle)
 
 -- | Register a group of metrics sharing a common sampling action. If
@@ -284,26 +283,28 @@ insertGroup getters cb state0
             HM.keys getters
 
 insertGroupSampler :: GroupSampler -> State -> (State, GroupId)
-insertGroupSampler groupSampler state0@State{..} =
-  let state1 = state0
+insertGroupSampler groupSampler state0 =
+  let stateNextGroupId0 = stateNextGroupId state0
+      state1 = state0
         { stateGroups =
-            M.insert stateNextGroupId groupSampler stateGroups
-        , stateNextGroupId = stateNextGroupId + 1
+            M.insert stateNextGroupId0 groupSampler (stateGroups state0)
+        , stateNextGroupId = stateNextGroupId0 + 1
         }
-  in  (state1, stateNextGroupId)
+  in  (state1, stateNextGroupId0)
 
 insertGroupReference
   :: GroupId -> State -> Identifier -> (State, Handle)
-insertGroupReference groupId state0@State{..} identifier =
-  let state1 = state0
+insertGroupReference groupId state0 identifier =
+  let stateNextMetricVersion0 = stateNextMetricVersion state0
+      state1 = state0
         { stateMetrics =
             HM.insert
               identifier
-              (Right groupId, stateNextMetricVersion)
-              stateMetrics
-        , stateNextMetricVersion = stateNextMetricVersion + 1
+              (Right groupId, stateNextMetricVersion0)
+              (stateMetrics state0)
+        , stateNextMetricVersion = stateNextMetricVersion0 + 1
         }
-      handle = Handle identifier stateNextMetricVersion
+      handle = Handle identifier stateNextMetricVersion0
   in  (state1, handle)
 
 ------------------------------------------------------------------------
@@ -333,12 +334,6 @@ deregisterByHandle (Handle identifier version) state =
                 deregister identifier state
             else
                 state
-
--- | A convenience function for deregistering a list of handles. See
--- `deregisterByHandle`.
-deregisterByHandles :: [Handle] -> State -> State
-deregisterByHandles handles state =
-  foldl' (flip deregisterByHandle) state handles
 
 -- | Deregister all metrics (of any type) with the given name, ignoring
 -- tags.

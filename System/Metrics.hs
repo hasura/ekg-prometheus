@@ -6,8 +6,10 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -411,11 +413,9 @@ newtype Registration (metric :: Symbol -> MetricType -> Type -> Type)
   = Registration Metrics.Registration
 
 -- | Combine registration actions by running one after the other.
-instance Semigroup (Registration metrics) where
-  Registration f <> Registration g = Registration (f <> g)
+deriving instance Semigroup (Registration metrics)
 
-instance Monoid (Registration metrics) where
-  mempty = Registration mempty
+deriving instance Monoid (Registration metrics)
 
 -- | Register a non-negative, monotonically increasing, integer-valued
 -- metric. The provided action to read the value must be thread-safe.
@@ -659,11 +659,9 @@ newtype Deregistration (metrics :: Symbol -> MetricType -> Type -> Type)
   = Deregistration Metrics.Deregistration
 
 -- | Combine deregistration actions by running one after the other.
-instance Semigroup (Deregistration metrics) where
-  Deregistration f <> Deregistration g = Deregistration (f <> g)
+deriving instance Semigroup (Deregistration metrics)
 
-instance Monoid (Deregistration metrics) where
-  mempty = Deregistration mempty
+deriving instance Monoid (Deregistration metrics)
 
 -- | Deregister a metric with a specific class and tag set.
 deregisterMetric
