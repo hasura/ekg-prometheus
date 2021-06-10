@@ -7,8 +7,6 @@ module Distribution
 
 import Data.Foldable (for_, traverse_)
 import qualified System.Metrics.Distribution as Distribution
-import qualified System.Metrics.Distribution.Internal as Distribution
-import System.Metrics.Internal.Store
 import Test.Hspec
 import Test.HUnit
 
@@ -83,8 +81,8 @@ test_stats_addN = do
         in  sumDiffSquares / fromIntegral sampleCount
 
   dist <- Distribution.new
-  for_ sample $ \sample ->
-    Distribution.addN dist sample repetition
+  for_ sample $ \x ->
+    Distribution.addN dist x repetition
   stats <- Distribution.read dist
 
   assertBool "Mean not correct" $

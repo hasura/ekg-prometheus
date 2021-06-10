@@ -1,14 +1,12 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -288,7 +286,7 @@ instance ToTags (M.HashMap T.Text T.Text) where
 --
 -- | Deriving instances of `ToTags` for records that exclusively have
 -- fields of type `Text`.
-class GToTags (f :: * -> *) where
+class GToTags (f :: Type -> Type) where
   gToTags :: T.Text -> f x -> M.HashMap T.Text T.Text
 
 -- Data (passthrough)
@@ -404,8 +402,8 @@ register
   :: Store metrics -- ^ Metric store
   -> Registration metrics -- ^ Registration action
   -> IO (IO ()) -- ^ Deregistration handle
-register (Store store) (Registration register) =
-    Metrics.register store register
+register (Store store) (Registration registration) =
+    Metrics.register store registration
 
 -- | An action that registers one or more metrics to a metric store.
 -- Can only be run by `register`.
@@ -652,8 +650,8 @@ deregister
   :: Store metrics -- ^ Metric store
   -> Deregistration metrics -- ^ Deregistration action
   -> IO ()
-deregister (Store store) (Deregistration deregister) =
-    Metrics.deregister store deregister
+deregister (Store store) (Deregistration deregistration) =
+    Metrics.deregister store deregistration
 
 -- | An action that deregisters one or more metrics from a metric store.
 -- Can only be run by `deregister`.

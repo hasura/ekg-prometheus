@@ -4,7 +4,7 @@
 {-# LANGUAGE TypeApplications #-}
 
 module System.Metrics.SimpleExample
-  (
+  ( main
   ) where
 
 import Data.Kind (Type)
@@ -17,6 +17,7 @@ import qualified System.Metrics.Counter as Counter
 data AppMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
     RequestCount :: AppMetrics "myapp.request_count" 'CounterType ()
 
+main :: IO ()
 main = do
     store <- newStore @AppMetrics
     requests <- createCounter RequestCount () store

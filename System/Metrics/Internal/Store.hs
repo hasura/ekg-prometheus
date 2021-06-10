@@ -1,7 +1,4 @@
 {-# OPTIONS_HADDOCK hide #-}
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 -- |
 -- This module defines the metrics store and all of its operations using
 -- the state type defined in "System.Metrics.Internal.State". The
@@ -68,13 +65,11 @@ module System.Metrics.Internal.Store
     , Value(..)
     ) where
 
-import Control.Applicative ((<$>))
 import qualified Data.HashMap.Strict as M
 import Data.Int (Int64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.List (foldl')
 import qualified Data.Text as T
-import qualified GHC.Stats as Stats
 import Prelude hiding (read)
 
 import System.Metrics.Counter (Counter)
@@ -93,7 +88,7 @@ import qualified System.Metrics.Label as Label
 -- * The metric store
 
 -- | A mutable metric store.
-newtype Store = Store { storeState :: IORef State }
+newtype Store = Store (IORef State)
 
 -- | Create a new, empty metric store.
 newStore :: IO Store

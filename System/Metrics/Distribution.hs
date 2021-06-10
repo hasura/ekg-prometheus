@@ -26,15 +26,11 @@ module System.Metrics.Distribution
     , Internal.max
     ) where
 
-import qualified Prelude
 import Prelude hiding (max, min, read, sum)
 
-import Control.Exception (assert)
-import Control.Monad (forM_, replicateM, when)
+import Control.Monad (forM_, replicateM)
 import qualified Data.Array as A
 import Data.Primitive.ByteArray
-import Data.Primitive.MachDeps (sIZEOF_INT)
-import Data.Primitive.Types
 import GHC.Float
 import GHC.Int
 import GHC.IO

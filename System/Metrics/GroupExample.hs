@@ -15,6 +15,7 @@ data RTSMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
   Gcs :: RTSMetrics "gcs" 'CounterType ()
   MaxLiveBytes :: RTSMetrics "max_live_bytes" 'GaugeType ()
 
+main :: IO ()
 main = do
   store <- newStore
   let samplingGroup =

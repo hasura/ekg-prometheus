@@ -1,9 +1,5 @@
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE ForeignFunctionInterface #-}
-{-# LANGUAGE MagicHash #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE UnboxedTuples #-}
 -- | An atomic integer value. All operations are thread safe.
 module Data.Atomic
     (

@@ -46,7 +46,9 @@ identifierGroups =
   , [a, b, c]
   ]
   where
-    (a:b:c:_) = identifiers
+    (a, b, c) = case identifiers of
+      (x:y:z:_) -> (x, y, z)
+      _ -> error "Test implementation error: Not enough identifiers"
 
 samplingGroups :: [M.HashMap Identifier (() -> Value)]
 samplingGroups = map (M.fromList . map (, sample)) identifierGroups

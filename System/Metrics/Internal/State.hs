@@ -31,6 +31,7 @@ module System.Metrics.Internal.State
     , deregister
     , Handle
     , deregisterByHandle
+    , deregisterByHandles
     , deregisterByName
 
       -- * Sampling metrics
@@ -43,7 +44,6 @@ module System.Metrics.Internal.State
     , sampleState
     ) where
 
-import Control.Applicative ((<$>))
 import Control.Monad (forM)
 import Data.Hashable
 import Data.Int (Int64)
@@ -303,11 +303,11 @@ insertGroup
 insertGroup getters cb state
   | M.null getters = (state, [])
   | otherwise =
-      let (state', groupId) = insertGroup state
+      let (state', groupId) = insertGroup' state
       in  mapAccumL (insertGroupReference groupId) state' $ M.keys getters
   where
-    insertGroup :: State -> (State, GroupId)
-    insertGroup State{..} =
+    insertGroup' :: State -> (State, GroupId)
+    insertGroup' State{..} =
       let state' = State
             { stateMetrics = stateMetrics
             , stateGroups =
@@ -321,7 +321,7 @@ insertGroup getters cb state
     insertGroupReference
       :: GroupId -> State -> Identifier -> (State, Handle)
     insertGroupReference groupId State{..} identifier =
-      let state = State
+      let state' = State
             { stateMetrics =
                 M.insert
                   identifier
@@ -332,7 +332,7 @@ insertGroup getters cb state
             , stateNextMetricVersion = stateNextMetricVersion + 1
             }
           handle = Handle identifier stateNextMetricVersion
-      in  (state, handle)
+      in  (state', handle)
 
 -- | Deregister all metrics (of any type) with the given name, ignoring
 -- tags.
@@ -372,7 +372,7 @@ sampleAll state = do
 
 -- | Sample all metric groups.
 sampleGroups :: [GroupSampler] -> IO [(Identifier, Value)]
-sampleGroups cbSamplers = concat `fmap` sequence (map runOne cbSamplers)
+sampleGroups cbSamplers = concat `fmap` mapM runOne cbSamplers
   where
     runOne :: GroupSampler -> IO [(Identifier, Value)]
     runOne GroupSampler{..} = do
