@@ -43,6 +43,7 @@ module System.Metrics.Internal.State
       -- * Testing
     , SampledState (..)
     , sampleState
+    , functionallyEqual
     ) where
 
 import Control.Monad (forM)
@@ -73,6 +74,11 @@ data State = State
         -- Identifiers are associated with a metric unless they are part
         -- of a sample group, in which case the identifier is associated
         -- with the group while the group is associated with the metric.
+        --
+        -- Identifiers are also associated with a `Version` number in
+        -- order to differentiate between the different metrics an
+        -- identifier may be associated with over time as metrics are
+        -- deregistered and reregistered.
      , stateGroups  :: !(M.Map GroupId GroupSampler)
         -- ^ Actions to sample groups of metrics, indexed by `GroupId`.
         --
@@ -446,3 +452,21 @@ sampleState State{..} = do
       :: GroupSampler -> IO (HM.HashMap Identifier Value)
     sampleGroupSampler GroupSampler{..} =
       (\r -> HM.map ($ r) groupSamplerMetrics) <$> groupSampleAction
+
+-- | Test for equality ignoring `MetricId`s and `GroupId`s.
+--
+-- This test assumes that each `GroupSampler` in `stateGroups` is
+-- unique, which follows from the `State` invariants.
+functionallyEqual :: SampledState -> SampledState -> Bool
+functionallyEqual state1 state2 = withoutIds state1 == withoutIds state2
+  where
+    withoutIds
+      :: SampledState
+      -> HM.HashMap Identifier
+                    (Either Value (Maybe (HM.HashMap Identifier Value)))
+    withoutIds state =
+      flip HM.map (sampledStateMetrics state) $
+        \(e, _) -> case e of
+          Left value -> Left value
+          Right groupId ->
+            Right $ M.lookup groupId (sampledStateGroups state)

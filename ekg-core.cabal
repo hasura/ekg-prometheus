@@ -83,9 +83,12 @@ test-suite ekg-core-test
   other-modules:
     Distribution
     State
+    Store
   build-depends:
     base,
     ekg-core,
+    async ^>= 2.2.1,
+    containers >= 0.5 && < 0.7,
     generic-random ^>= 1.4.0.0,
     hspec ^>= 2.8.2,
     hspec-smallcheck ^>= 0.5.2,
