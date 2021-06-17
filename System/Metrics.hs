@@ -111,12 +111,12 @@ module System.Metrics
   , createLabel
   , createDistribution
 
-    -- ** Deregistering
-    -- $deregistering
-  , Deregistration
-  , deregister
-  , deregisterMetric
-  , deregisterClass
+    -- -- ** Deregistering
+    -- -- $deregistering
+  -- , Deregistration
+  -- , deregister
+  -- , deregisterMetric
+  -- , deregisterClass
 
     -- * Sampling metrics
     -- $sampling
@@ -646,11 +646,11 @@ createGeneric f _ tags (Store store) =
 -- but you can also deregister metrics with this alternative interface.
 
 -- | Atomically apply a deregistration action to a metrics store.
-deregister
+_deregister
   :: Store metrics -- ^ Metric store
   -> Deregistration metrics -- ^ Deregistration action
   -> IO ()
-deregister (Store store) (Deregistration deregistration) =
+_deregister (Store store) (Deregistration deregistration) =
     Metrics.deregister store deregistration
 
 -- | An action that deregisters one or more metrics from a metric store.
@@ -664,23 +664,23 @@ deriving instance Semigroup (Deregistration metrics)
 deriving instance Monoid (Deregistration metrics)
 
 -- | Deregister a metric with a specific class and tag set.
-deregisterMetric
+_deregisterMetric
   :: forall metrics name metricType tags.
       (KnownSymbol name, ToTags tags)
   => metrics name metricType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> Deregistration metrics
-deregisterMetric _ tags =
+_deregisterMetric _ tags =
   let name = T.pack $ symbolVal (Proxy @name)
       identifier = Metrics.Identifier name (toTags tags)
   in  Deregistration $ Metrics.deregisterMetric identifier
 
 -- | Deregister all the metrics registered to a class.
-deregisterClass
+_deregisterClass
   :: forall metrics name metricType tags. (KnownSymbol name)
   => metrics name metricType tags -- ^ Metric class
   -> Deregistration metrics
-deregisterClass _ =
+_deregisterClass _ =
   let name = T.pack $ symbolVal (Proxy @name)
   in  Deregistration $ Metrics.deregisterByName name
 
