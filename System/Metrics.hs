@@ -88,9 +88,9 @@ module System.Metrics
     -- * Sampling metrics
     -- $sampling
   , sampleAll
-  , Metrics.Sample
-  , Metrics.Identifier (..)
-  , Metrics.Value (..)
+  , Internal.Sample
+  , Internal.Identifier (..)
+  , Internal.Value (..)
 
     -- * Predefined metrics
     -- $predefined
@@ -110,7 +110,7 @@ import GHC.TypeLits
 import qualified System.Metrics.Counter as Counter
 import qualified System.Metrics.Distribution as Distribution
 import qualified System.Metrics.Gauge as Gauge
-import qualified System.Metrics.Internal.Store as Metrics -- TODO: Import as Internal
+import qualified System.Metrics.Internal.Store as Internal
 import qualified System.Metrics.Label as Label
 
 -- $overview
@@ -175,11 +175,11 @@ import qualified System.Metrics.Label as Label
 -- their name, metric type, and possible tags statically determined by
 -- the respective type indices of @metrics@.
 newtype Store (metrics :: Symbol -> MetricType -> Type -> Type) =
-  Store Metrics.Store
+  Store Internal.Store
 
 -- | Create a new, empty metric store.
 newStore :: IO (Store metrics)
-newStore = Store <$> Metrics.newStore
+newStore = Store <$> Internal.newStore
 
 ------------------------------------------------------------------------
 -- * Static metric annotations
@@ -201,12 +201,12 @@ type family MetricValue (t :: MetricType) :: Type where
 
 -- | The `Metrics.Value` constructor for each metric.
 class ToMetricValue (t :: MetricType) where
-  toMetricValue :: Proxy t -> MetricValue t -> Metrics.Value
+  toMetricValue :: Proxy t -> MetricValue t -> Internal.Value
 
-instance ToMetricValue 'CounterType      where toMetricValue _ = Metrics.Counter
-instance ToMetricValue 'GaugeType        where toMetricValue _ = Metrics.Gauge
-instance ToMetricValue 'LabelType        where toMetricValue _ = Metrics.Label
-instance ToMetricValue 'DistributionType where toMetricValue _ = Metrics.Distribution
+instance ToMetricValue 'CounterType      where toMetricValue _ = Internal.Counter
+instance ToMetricValue 'GaugeType        where toMetricValue _ = Internal.Gauge
+instance ToMetricValue 'LabelType        where toMetricValue _ = Internal.Label
+instance ToMetricValue 'DistributionType where toMetricValue _ = Internal.Distribution
 
 -- | The default implementation of each metric.
 type family MetricsImpl (t :: MetricType) where
@@ -391,12 +391,12 @@ register
   -> Registration metrics -- ^ Registration action
   -> IO (IO ()) -- ^ Deregistration handle
 register (Store store) (Registration registration) =
-    Metrics.register store registration
+    Internal.register store registration
 
 -- | An action that registers one or more metrics to a metric store.
 -- Can only be run by `register`.
 newtype Registration (metric :: Symbol -> MetricType -> Type -> Type)
-  = Registration Metrics.Registration
+  = Registration Internal.Registration
 
 -- | Combine registration actions by running one after the other.
 deriving instance Semigroup (Registration metrics)
@@ -412,7 +412,7 @@ registerCounter
   -> tags -- ^ Tags
   -> IO Int64 -- ^ Action to read the current metric value
   -> Registration metrics
-registerCounter = registerGeneric Metrics.registerCounter
+registerCounter = registerGeneric Internal.registerCounter
 
 -- | Register an integer-valued metric. The provided action to read
 -- the value must be thread-safe. Also see 'createGauge'.
@@ -422,7 +422,7 @@ registerGauge
   -> tags -- ^ Tags
   -> IO Int64 -- ^ Action to read the current metric value
   -> Registration metrics
-registerGauge = registerGeneric Metrics.registerGauge
+registerGauge = registerGeneric Internal.registerGauge
 
 -- | Register a text metric. The provided action to read the value
 -- must be thread-safe. Also see 'createLabel'.
@@ -432,7 +432,7 @@ registerLabel
   -> tags -- ^ Tags
   -> IO T.Text -- ^ Action to read the current metric value
   -> Registration metrics
-registerLabel = registerGeneric Metrics.registerLabel
+registerLabel = registerGeneric Internal.registerLabel
 
 -- | Register a distribution metric. The provided action to read the
 -- value must be thread-safe. Also see 'createDistribution'.
@@ -442,20 +442,20 @@ registerDistribution
   -> tags -- ^ Tags
   -> IO Distribution.Stats -- ^ Action to read the current metric value
   -> Registration metrics
-registerDistribution = registerGeneric Metrics.registerDistribution
+registerDistribution = registerGeneric Internal.registerDistribution
 
 registerGeneric
   :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
-  => ( Metrics.Identifier
+  => ( Internal.Identifier
       -> IO (MetricValue metricType)
-      -> Metrics.Registration)
+      -> Internal.Registration)
   -> metrics name metricType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO (MetricValue metricType) -- ^ Action to read the current metric value
   -> Registration metrics -- ^ Registration action
 registerGeneric f _ tags sample =
   let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name (toTags tags)
+      identifier = Internal.Identifier name (toTags tags)
   in  Registration $ f identifier sample
 
 -- | Register an action that will be executed any time one of the
@@ -520,7 +520,7 @@ data SamplingGroup
 -- | Helper class for `registerGroup`.
 class RegisterGroup (xs :: [Type]) where
   registerGroup_
-    :: [(Metrics.Identifier, env -> Metrics.Value)] -- ^ Processed metrics
+    :: [(Internal.Identifier, env -> Internal.Value)] -- ^ Processed metrics
     -> SamplingGroup metrics env xs -- ^ Metrics to be processed
     -> IO env -- ^ Action to sample the metric group
     -> Registration metrics
@@ -528,7 +528,7 @@ class RegisterGroup (xs :: [Type]) where
 -- | Base case
 instance RegisterGroup '[] where
   registerGroup_ getters SamplingGroup sample =
-    Registration $ Metrics.registerGroup (M.fromList getters) sample
+    Registration $ Internal.registerGroup (M.fromList getters) sample
 
 -- | Inductive case
 instance
@@ -539,9 +539,9 @@ instance
   ) => RegisterGroup (metrics name metricType tags ': xs)
   where
   registerGroup_ getters (group :> (_, tags, getter)) sample =
-    let identifier = Metrics.Identifier
-          { Metrics.idName = T.pack $ symbolVal (Proxy @name)
-          , Metrics.idTags = toTags tags }
+    let identifier = Internal.Identifier
+          { Internal.idName = T.pack $ symbolVal (Proxy @name)
+          , Internal.idTags = toTags tags }
         getter' =
           ( identifier
           , toMetricValue (Proxy @metricType) . getter )
@@ -563,7 +563,7 @@ createCounter
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO Counter.Counter
-createCounter = createGeneric Metrics.createCounter
+createCounter = createGeneric Internal.createCounter
 
 -- | Create and register a zero-initialized gauge.
 createGauge
@@ -572,7 +572,7 @@ createGauge
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO Gauge.Gauge
-createGauge = createGeneric Metrics.createGauge
+createGauge = createGeneric Internal.createGauge
 
 -- | Create and register an empty label.
 createLabel
@@ -581,7 +581,7 @@ createLabel
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO Label.Label
-createLabel = createGeneric Metrics.createLabel
+createLabel = createGeneric Internal.createLabel
 
 -- | Create and register an event tracker.
 createDistribution
@@ -590,18 +590,18 @@ createDistribution
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO Distribution.Distribution
-createDistribution = createGeneric Metrics.createDistribution
+createDistribution = createGeneric Internal.createDistribution
 
 createGeneric
   :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
-  => (Metrics.Identifier -> Metrics.Store -> IO (MetricsImpl metricType))
+  => (Internal.Identifier -> Internal.Store -> IO (MetricsImpl metricType))
   -> metrics name metricType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO (MetricsImpl metricType)
 createGeneric f _ tags (Store store) =
   let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name (toTags tags)
+      identifier = Internal.Identifier name (toTags tags)
   in  f identifier store
 
 ------------------------------------------------------------------------
@@ -617,12 +617,12 @@ _deregister
   -> Deregistration metrics -- ^ Deregistration action
   -> IO ()
 _deregister (Store store) (Deregistration deregistration) =
-    Metrics.deregister store deregistration
+    Internal.deregister store deregistration
 
 -- | An action that deregisters one or more metrics from a metric store.
 -- Can only be run by `deregister`.
 newtype Deregistration (metrics :: Symbol -> MetricType -> Type -> Type)
-  = Deregistration Metrics.Deregistration
+  = Deregistration Internal.Deregistration
 
 -- | Combine deregistration actions by running one after the other.
 deriving instance Semigroup (Deregistration metrics)
@@ -638,8 +638,8 @@ _deregisterMetric
   -> Deregistration metrics
 _deregisterMetric _ tags =
   let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Metrics.Identifier name (toTags tags)
-  in  Deregistration $ Metrics.deregisterMetric identifier
+      identifier = Internal.Identifier name (toTags tags)
+  in  Deregistration $ Internal.deregisterMetric identifier
 
 -- | Deregister all the metrics registered to a class.
 _deregisterClass
@@ -648,7 +648,7 @@ _deregisterClass
   -> Deregistration metrics
 _deregisterClass _ =
   let name = T.pack $ symbolVal (Proxy @name)
-  in  Deregistration $ Metrics.deregisterByName name
+  in  Deregistration $ Internal.deregisterByName name
 
 ------------------------------------------------------------------------
 -- * Sampling metrics
@@ -663,8 +663,8 @@ _deregisterClass _ =
 -- | Sample all metrics. Sampling is /not/ atomic in the sense that
 -- some metrics might have been mutated before they're sampled but
 -- after some other metrics have already been sampled.
-sampleAll :: Store metrics -> IO Metrics.Sample
-sampleAll (Store store) = Metrics.sampleAll store
+sampleAll :: Store metrics -> IO Internal.Sample
+sampleAll (Store store) = Internal.sampleAll store
 
 ------------------------------------------------------------------------
 -- * Predefined metrics
