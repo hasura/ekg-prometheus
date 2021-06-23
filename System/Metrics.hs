@@ -15,46 +15,10 @@
 {-# LANGUAGE TypeOperators #-}
 
 -- |
--- A module for defining metrics that can be monitored.
+-- This module is for defining metrics that can be monitored.
 --
--- Metrics are used to monitor program behavior and performance. All
--- metrics have
---
---  * a name,
---
---  * a set of tags, and
---
---  * a way to get the metric's current value.
---
--- This module provides a way to register metrics in a global \"metric
--- store\". The store can then be used to get a snapshot of all
--- metrics. The store also serves as a central place to keep track of
--- all the program's metrics, both user and library defined.
---
--- Here's an example of creating a single counter, used to count the
--- number of request served by a web server:
---
--- > import Data.Kind (Type)
--- > import GHC.TypeLits (Symbol)
--- > import System.Metrics
--- > import qualified System.Metrics.Counter as Counter
--- >
--- > -- A user-specified GADT statically determines the names, types, and
--- > -- possible tags of the metrics that can be registered to the store.
--- >
--- > data AppMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
--- >     RequestCount :: AppMetrics "myapp.request_count" 'CounterType ()
--- >
--- > main = do
--- >     store <- newStore @AppMetrics
--- >     requests <- createCounter RequestCount () store
--- >     -- Every time we receive a request:
--- >     Counter.inc requests
---
--- This module also provides a way to register a number of predefined
--- metrics that are useful in most applications. See e.g.
--- 'registerGcMetrics'.
-
+-- This is an API reference. For an introduction to this module and
+-- examples of its use, see the tutorial.
 
 -- Implementation note:
 -- This module merely wraps and restricts the interface of
@@ -65,6 +29,9 @@
 
 module System.Metrics
   (
+    -- * Overview
+    -- $overview
+
     -- * Naming metrics
     -- $naming
 
@@ -145,6 +112,25 @@ import qualified System.Metrics.Distribution as Distribution
 import qualified System.Metrics.Gauge as Gauge
 import qualified System.Metrics.Internal.Store as Metrics -- TODO: Import as Internal
 import qualified System.Metrics.Label as Label
+
+-- $overview
+-- Metrics are used to monitor program behavior and performance. All
+-- metrics have
+--
+--  * a name,
+--
+--  * a set of tags, and
+--
+--  * a way to get the metric's current value.
+--
+-- This module provides a way to register metrics in a global \"metric
+-- store\". The store can then be used to get a snapshot of all
+-- metrics. The store also serves as a central place to keep track of
+-- all the program's metrics, both user and library defined.
+--
+-- This module also provides a way to register a number of predefined
+-- metrics that are useful in most applications. See e.g.
+-- 'registerGcMetrics'.
 
 -- $naming
 -- Compound metric names should be separated using underscores.
@@ -236,20 +222,21 @@ type family MetricsImpl (t :: MetricType) where
 -- ("tags"), which are used to annotate metrics with metadata.
 --
 -- Each metric must be associated with a type from this typeclass. The
--- type determines the possible tag sets that may be attached to the
--- metric.
+-- type determines the structure of the tag sets that may be attached to
+-- the metric.
 --
 -- For convenience, one may derive, via "GHC.Generics", a `ToTags`
 -- instance for any record that exclusively has fields of type `T.Text`.
--- [TODO: Support more field types for deriving.]
 --
--- Example usage:
+-- For example:
 --
 -- > {-# LANGUAGE DeriveGeneric #-}
 -- > {-# LANGUAGE OverloadedStrings #-}
 -- >
 -- > import qualified Data.Text as T
 -- > import GHC.Generics
+-- >
+-- > import System.Metrics
 -- >
 -- > data MyTags = MyTags
 -- >   { key1 :: T.Text
@@ -328,7 +315,7 @@ instance GToTags (K1 i T.Text) where
 -- through the references. In other words, they are /scoped/ by their
 -- type parameter.
 --
--- It may be useful to create a new reference to a metric store that is
+-- It can be useful to create a new reference to a metric store that is
 -- scoped to a subset of its metrics. This can be done as long as the
 -- subset can be represented by a function (see `subset`).
 
@@ -386,20 +373,19 @@ ofAll _ = Metric
 -- ** Registering
 
 -- $registering
--- Metrics are identified by the combination of the class they are
--- registered to and the tag set they are registered with. If you try to
--- register a metric at an identifier that is already in use by an
--- existing metric, the existing metric will be deregistered and
+-- Metrics are identified by both their metric class and tag set. If you
+-- try to register a metric at an identifier that is already in use by
+-- an existing metric, the existing metric will be deregistered and
 -- replaced by the new metric.
 --
 -- Upon `register`ing a set of metrics, you will be given a handle that
 -- can be used to deregister the newly registered metrics /specifically/,
--- in the following sense. If a deregistration handle is supposed to
--- deregister a metric, and that metric is replaced by a new metric, the
--- new metric will not be deregistered if the handle is handle used.
+-- in the following sense. If a deregistration handle targets a metric,
+-- and that metric is replaced by a new metric, the new metric will not
+-- be deregistered if the handle is handle used.
 
 -- | Atomically register one or more metrics. Returns a handle for
--- (atomically) deregistering those metrics specifically.
+-- atomically deregistering those metrics specifically.
 register
   :: Store metrics -- ^ Metric store
   -> Registration metrics -- ^ Registration action
@@ -500,26 +486,6 @@ registerGeneric f _ tags sample =
 -- action computes @a@ atomically (e.g. if @a@ is a record, the action
 -- needs to compute its fields atomically if the sampling is to be
 -- atomic.)
---
--- Example usage:
---
--- > import Data.Kind (Type)
--- > import GHC.Stats
--- > import GHC.TypeLits (Symbol)
--- > import System.Metrics
--- >
--- > data RTSMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
--- >   Gcs :: RTSMetrics "gcs" 'CounterType ()
--- >   MaxLiveBytes :: RTSMetrics "max_live_bytes" 'GaugeType ()
--- >
--- > main = do
--- >   store <- newStore
--- >   let samplingGroup =
--- >         SamplingGroup
--- >           :> (Gcs, (), fromIntegral . gcs)
--- >           :> (MaxLiveBytes, (), fromIntegral . max_live_bytes)
--- >   _ <- register store $ registerGroup samplingGroup getRTSStats
--- >   pure ()
 --
 -- (Note: The @RegisterGroup@ constraint can safely be ignored.)
 --
