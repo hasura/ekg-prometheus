@@ -32,6 +32,8 @@ common library-build-depends
     inspection-testing ^>= 0.4.2.3,
     primitive ^>= 0.7.1.0,
     text < 1.3,
+    bytestring,
+    deepseq,
     unordered-containers < 0.3
 
 library
@@ -41,6 +43,8 @@ library
     System.Metrics.Counter
     System.Metrics.Distribution
     System.Metrics.Distribution.Internal
+    System.Metrics.Distribution.Internal.Stripe32
+    System.Metrics.Distribution.Internal.Stripe64
     System.Metrics.Gauge
     System.Metrics.Internal.State
     System.Metrics.Internal.Store
