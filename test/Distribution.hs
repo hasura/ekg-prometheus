@@ -1,4 +1,6 @@
+{-# LANGUAGE MagicHash #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Distribution
@@ -7,9 +9,17 @@ module Distribution
 
 import Data.Foldable (for_, traverse_)
 import qualified System.Metrics.Distribution as Distribution
+import System.Metrics.Distribution.Internal.Stripe64
+  (stripeAddN#, stripeCombine#)
 import Tasks (addToDistributionWithMultipleWriters)
 import Test.Hspec
 import Test.HUnit
+import Test.Inspection
+  ( Property (NoAllocation)
+  , Result (Failure, Success)
+  , inspectTest
+  , mkObligation
+  )
 
 tests :: Spec
 tests =
@@ -18,6 +28,7 @@ tests =
     it "computes its statistics correctly" test_stats
     it "computes its statistics correctly (with `addN`)" test_stats_addN
     it "is thread-safe" test_threads
+    it "does not allocate memory while holding spinlocks" test_no_allocate
 
 -- | Check that an distribution with no values returns zero for all its
 -- statistics.
@@ -107,3 +118,17 @@ test_threads :: IO ()
 test_threads = do
   result <- addToDistributionWithMultipleWriters
   result `seq` pure ()
+
+-- | Ensure that functions that hold locks never allocate memory. If
+-- they did, threads running those functions could receive exceptions or
+-- be descheduled by the runtime while holding the lock, which could
+-- result in deadlock or severe performance degredation, respectively.
+test_no_allocate :: IO ()
+test_no_allocate = do
+  case $(inspectTest (mkObligation 'stripeAddN# NoAllocation)) of
+    Failure msg -> assertFailure msg
+    Success _msg -> pure ()
+
+  case $(inspectTest (mkObligation 'stripeCombine# NoAllocation)) of
+    Failure msg -> assertFailure msg
+    Success _msg -> pure ()

@@ -10,6 +10,10 @@ module System.Metrics.Distribution.Internal.Stripe64
     , stripeAddN
     , stripeCombine
     , readStripe
+
+      -- * Internals exposed for testing
+    , stripeAddN#
+    , stripeCombine#
     ) where
 
 #include "MachDeps.h"
@@ -23,7 +27,6 @@ import GHC.Float
 import GHC.Int
 import GHC.IO
 import GHC.Prim
-import Test.Inspection
 
 -- We want at least 64 bits in order to avoid overflow of the count of
 -- samples added to the distribution.
@@ -245,13 +248,6 @@ stripeCombine# arr accArr s0 =
       s20
       }}}}}}}}}}}}}}}}}}}}}}}}}}}}
   }}}}}}}}
-
--- Ensure that functions that hold locks never allocate memory. If they
--- did, threads running those functions could receive exceptions or be
--- descheduled by the runtime while holding the lock, which could result
--- in deadlock or severe performance degredation, respectively.
-inspect $ mkObligation 'stripeAddN# NoAllocation
-inspect $ mkObligation 'stripeCombine# NoAllocation
 
 readStripe :: Stripe -> IO Internal.Stats
 readStripe (Stripe arr) = do
