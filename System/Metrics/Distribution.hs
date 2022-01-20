@@ -42,7 +42,6 @@ import GHC.Float
 import GHC.Int
 import GHC.IO
 import GHC.Prim
-import Test.Inspection
 
 #else
 
@@ -295,13 +294,6 @@ stripeCombine# arr accArr s0 =
       s20
       }}}}}}}}}}}}}}}}}}}}}}}}}}}}
   }}}}}}}}
-
--- Ensure that functions that hold locks never allocate memory. If they
--- did, threads running those functions could receive exceptions or be
--- descheduled by the runtime while holding the lock, which could result
--- in deadlock or severe performance degredation, respectively.
-inspect $ mkObligation 'stripeAddN# NoAllocation
-inspect $ mkObligation 'stripeCombine# NoAllocation
 
 readStripe :: Stripe -> IO Internal.Stats
 readStripe (Stripe arr) = do
