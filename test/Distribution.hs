@@ -8,9 +8,18 @@ module Distribution
   ) where
 
 import Data.Foldable (for_, traverse_)
+import Data.Primitive.ByteArray
+import GHC.Float
+import GHC.Prim
+
 import qualified System.Metrics.Distribution as Distribution
 import System.Metrics.Distribution.Internal.Stripe64
-  (stripeAddN#, stripeCombine#)
+  ( Stripe
+  , stripeAddN#
+  , stripeCombine#
+  , stripeAddN
+  , stripeCombine
+  )
 import Tasks (addToDistributionWithMultipleWriters)
 import Test.Hspec
 import Test.HUnit
@@ -125,10 +134,31 @@ test_threads = do
 -- result in deadlock or severe performance degredation, respectively.
 test_no_allocate :: IO ()
 test_no_allocate = do
-  case $(inspectTest (mkObligation 'stripeAddN# NoAllocation)) of
+  case $(inspectTest (mkObligation 'testStripeAddN NoAllocation)) of
     Failure msg -> assertFailure msg
     Success _msg -> pure ()
 
-  case $(inspectTest (mkObligation 'stripeCombine# NoAllocation)) of
+  case $(inspectTest (mkObligation 'testStripeCombine NoAllocation)) of
     Failure msg -> assertFailure msg
     Success _msg -> pure ()
+
+testStripeAddN#
+  :: MutableByteArray# RealWorld
+  -> Double#
+  -> Int#
+  -> State# RealWorld
+  -> State# RealWorld
+testStripeAddN# = stripeAddN#
+
+testStripeCombine#
+  :: MutableByteArray# RealWorld
+  -> MutableByteArray# RealWorld
+  -> State# RealWorld
+  -> State# RealWorld
+testStripeCombine# = stripeCombine#
+
+testStripeAddN :: Stripe -> Double -> Int -> IO ()
+testStripeAddN = stripeAddN
+
+testStripeCombine :: Stripe -> Stripe -> IO ()
+testStripeCombine = stripeCombine
