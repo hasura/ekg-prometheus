@@ -903,17 +903,17 @@ data GcMetrics :: Symbol -> MetricType -> Type -> Type where
   ElapsedNs :: GcMetrics "rts.elapsed_ns" 'CounterType ()
 #if MIN_VERSION_base(4,14,1)
   -- | The CPU time used during the post-mark pause phase of the concurrent nonmoving GC.
-  NonmovingGcSyncCpuNs :: GcMetrics "nonmoving_gc_sync_cpu_ns" 'CounterType ()
+  NonmovingGcSyncCpuNs :: GcMetrics "rts.nonmoving_gc_sync_cpu_ns" 'CounterType ()
   -- | The time elapsed during the post-mark pause phase of the concurrent nonmoving GC.
-  NonmovingGcSyncElapsedNs :: GcMetrics "nonmoving_gc_sync_elapsed_ns" 'CounterType ()
+  NonmovingGcSyncElapsedNs :: GcMetrics "rts.nonmoving_gc_sync_elapsed_ns" 'CounterType ()
   -- | The maximum time elapsed during the post-mark pause phase of the concurrent nonmoving GC.
-  NonmovingGcSyncMaxElapsedNs :: GcMetrics "nonmoving_gc_sync_max_elapsed_ns" 'GaugeType ()
+  NonmovingGcSyncMaxElapsedNs :: GcMetrics "rts.nonmoving_gc_sync_max_elapsed_ns" 'GaugeType ()
   -- | The CPU time used during the post-mark pause phase of the concurrent nonmoving GC.
-  NonmovingGcCpuNs :: GcMetrics "nonmoving_gc_cpu_ns" 'CounterType ()
+  NonmovingGcCpuNs :: GcMetrics "rts.nonmoving_gc_cpu_ns" 'CounterType ()
   -- | The time elapsed during the post-mark pause phase of the concurrent nonmoving GC.
-  NonmovingGcElapsedNs :: GcMetrics "nonmoving_gc_elapsed_ns" 'CounterType ()
+  NonmovingGcElapsedNs :: GcMetrics "rts.nonmoving_gc_elapsed_ns" 'CounterType ()
   -- | The maximum time elapsed during the post-mark pause phase of the concurrent nonmoving GC.
-  NonmovingGcMaxElapsedNs :: GcMetrics "nonmoving_gc_max_elapsed_ns" 'GaugeType ()
+  NonmovingGcMaxElapsedNs :: GcMetrics "rts.nonmoving_gc_max_elapsed_ns" 'GaugeType ()
 #endif
 
   -- GCDetails
@@ -949,7 +949,7 @@ data GcMetrics :: Symbol -> MetricType -> Type -> Type where
   GcDetailsElapsedNs :: GcMetrics "rts.gc.elapsed_ns" 'GaugeType ()
 #if MIN_VERSION_base(4,14,1)
   -- | The CPU time used during the post-mark pause phase of the concurrent nonmoving GC.
-  GcdetailsNonmovingGcSyncCpuNs :: GcMetrics "gcdetails_nonmoving_gc_sync_cpu_ns" 'GaugeType ()
+  GcdetailsNonmovingGcSyncCpuNs :: GcMetrics "rts.gc.nonmoving_gc_sync_cpu_ns" 'GaugeType ()
   -- | The time elapsed during the post-mark pause phase of the concurrent nonmoving GC.
-  GcdetailsNonmovingGcSyncElapsedNs :: GcMetrics "gcdetails_nonmoving_gc_sync_elapsed_ns" 'GaugeType ()
+  GcdetailsNonmovingGcSyncElapsedNs :: GcMetrics "rts.gc.nonmoving_gc_sync_elapsed_ns" 'GaugeType ()
 #endif
