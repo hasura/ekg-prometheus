@@ -46,13 +46,12 @@ module System.Metrics.Internal.State
     , functionallyEqual
     ) where
 
-import Control.Monad (forM)
 import Data.Hashable
 import Data.Int (Int64)
 import qualified Data.HashMap.Strict as HM
-import qualified Data.HashSet as S
 import Data.List (foldl', mapAccumL)
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 import GHC.Generics
 import Prelude hiding (read)
@@ -68,7 +67,7 @@ type Version = Integer
 -- | The internal state of the metrics `System.Metrics.Store`.
 data State = State
      { stateMetrics ::
-        !(HM.HashMap Identifier (Either MetricSampler GroupId, Version))
+        !(M.Map Identifier (Either MetricSampler GroupId, Version))
         -- ^ A registry of all metrics in the store.
         --
         -- Identifiers are associated with a metric unless they are part
@@ -119,7 +118,7 @@ data MetricSampler
 data GroupSampler = forall a. GroupSampler
      { groupSampleAction   :: !(IO a)
         -- ^ Action to sample the metric group
-     , groupSamplerMetrics :: !(HM.HashMap Identifier (a -> Value))
+     , groupSamplerMetrics :: !(M.Map Identifier (a -> Value))
         -- ^ Metric identifiers and getter functions.
      }
 
@@ -130,13 +129,33 @@ data Identifier = Identifier
     , idTags :: HM.HashMap T.Text T.Text
       -- ^ The key-value pairs associated with the metric
     }
-    deriving (Eq, Generic, Show)
+    deriving (Generic, Show)
+
+-- | 'Identifier's are ordered lexicographically, where the name is more
+-- significant than the tags.
+--
+-- This ordering is used to efficiently group together metrics with the
+-- same name when serializing metrics. Such grouping is required, for
+-- example, by the Prometheus-2 exposition format.
+instance Ord Identifier where
+  compare (Identifier name1 tags1) (Identifier name2 tags2) =
+    case compare name1 name2 of
+      LT -> LT
+      GT -> GT
+      EQ -> compare tags1 tags2
+  {-# INLINE compare #-}
+
+instance Eq Identifier where
+  Identifier name1 tags1 == Identifier name2 tags2 =
+    name1 == name2 && tags1 == tags2
+  {-# INLINE (==) #-}
+
 
 instance Hashable Identifier
 
 -- | The initial state of a new store.
 initialState :: State
-initialState = State HM.empty M.empty 0 0
+initialState = State M.empty M.empty 0 0
 
 ------------------------------------------------------------------------
 -- * State verification
@@ -164,15 +183,15 @@ checkSampleGroups State{..} =
     groupsFromMetrics =
       foldl' insert_ M.empty
         [(id', groupId) |
-          (id', (Right groupId, _)) <- HM.toList stateMetrics]
+          (id', (Right groupId, _)) <- M.toList stateMetrics]
       where
         insert_ m (name, groupId) = M.alter (putName name) groupId m
         putName identifier =
             Just . maybe (S.singleton identifier) (S.insert identifier)
 
-groupSamplerIdentifiers :: GroupSampler -> S.HashSet Identifier
+groupSamplerIdentifiers :: GroupSampler -> S.Set Identifier
 groupSamplerIdentifiers GroupSampler{..} =
-  HM.keysSet groupSamplerMetrics
+  M.keysSet groupSamplerMetrics
 
 -- | Check the following invariant:
 --
@@ -190,7 +209,7 @@ checkNextGroupId State{..} =
 -- all existing metrics.
 checkNextMetricVersion :: State -> Bool
 checkNextMetricVersion State{..} =
-    let versions = map snd $ HM.elems stateMetrics
+    let versions = map snd $ M.elems stateMetrics
     in  all (< stateNextMetricVersion) versions
 
 ------------------------------------------------------------------------
@@ -208,23 +227,23 @@ deregister
     -> State
     -> State
 deregister identifier state =
-    case HM.lookup identifier (stateMetrics state) of
+    case M.lookup identifier (stateMetrics state) of
         Nothing -> state
         Just (Left _, _) -> state
-            { stateMetrics = HM.delete identifier $ stateMetrics state
+            { stateMetrics = M.delete identifier $ stateMetrics state
             }
         Just (Right groupID, _) -> state
-            { stateMetrics = HM.delete identifier $ stateMetrics state
+            { stateMetrics = M.delete identifier $ stateMetrics state
             , stateGroups =
                 let delete_ = overGroupSamplerMetrics $ \hm ->
-                        let hm' = HM.delete identifier hm
-                        in  if HM.null hm' then Nothing else Just hm'
+                        let hm' = M.delete identifier hm
+                        in  if M.null hm' then Nothing else Just hm'
                 in  M.update delete_ groupID $ stateGroups state
             }
 
 overGroupSamplerMetrics ::
   (Functor f) =>
-  (forall a. HM.HashMap Identifier a -> f (HM.HashMap Identifier a)) ->
+  (forall a. M.Map Identifier a -> f (M.Map Identifier a)) ->
   GroupSampler ->
   f GroupSampler
 overGroupSamplerMetrics f GroupSampler{..} =
@@ -251,7 +270,7 @@ insertMetricSampler identifier sampler state0 =
   let stateNextMetricVersion0 = stateNextMetricVersion state0
       state1 = state0
         { stateMetrics =
-            HM.insert
+            M.insert
               identifier
               (Left sampler, stateNextMetricVersion0)
               (stateMetrics state0)
@@ -265,28 +284,28 @@ insertMetricSampler identifier sampler state0 =
 -- existing metrics are first removed. Returns handles for deregistering
 -- the registered metrics. See `System.Metrics.registerGroup`.
 registerGroup
-    :: HM.HashMap Identifier
+    :: M.Map Identifier
        (a -> Value)  -- ^ Metric identifiers and getter functions
     -> IO a          -- ^ Action to sample the metric group
     -> State
     -> (State, [Handle])
 registerGroup getters cb = insertGroup getters cb . delete_
   where
-    delete_ state = foldl' (flip deregister) state (HM.keys getters)
+    delete_ state = foldl' (flip deregister) state (M.keys getters)
 
 insertGroup
-    :: HM.HashMap Identifier
+    :: M.Map Identifier
        (a -> Value)  -- ^ Metric identifiers and getter functions
     -> IO a          -- ^ Action to sample the metric group
     -> State
     -> (State, [Handle])
 insertGroup getters cb state0
-  | HM.null getters = (state0, [])
+  | M.null getters = (state0, [])
   | otherwise =
       let (state1, groupId) =
             insertGroupSampler (GroupSampler cb getters) state0
       in  mapAccumL (insertGroupReference groupId) state1 $
-            HM.keys getters
+            M.keys getters
 
 insertGroupSampler :: GroupSampler -> State -> (State, GroupId)
 insertGroupSampler groupSampler state0 =
@@ -304,7 +323,7 @@ insertGroupReference groupId state0 identifier =
   let stateNextMetricVersion0 = stateNextMetricVersion state0
       state1 = state0
         { stateMetrics =
-            HM.insert
+            M.insert
               identifier
               (Right groupId, stateNextMetricVersion0)
               (stateMetrics state0)
@@ -333,7 +352,7 @@ data Handle = Handle Identifier Version
 -- version matches that held by the `Handle`.
 deregisterByHandle :: Handle -> State -> State
 deregisterByHandle (Handle identifier version) state =
-    case HM.lookup identifier (stateMetrics state) of
+    case M.lookup identifier (stateMetrics state) of
         Nothing -> state
         Just (_, version') ->
             if version == version' then
@@ -349,7 +368,7 @@ deregisterByName
     -> State
 deregisterByName name state =
     let identifiers = -- Identifiers to be removed
-          filter (\i -> name == idName i) $ HM.keys $ stateMetrics state
+          filter (\i -> name == idName i) $ M.keys $ stateMetrics state
     in  foldl' (flip deregister) state identifiers
 
 ------------------------------------------------------------------------
@@ -363,19 +382,19 @@ deregisterByName name state =
 -- metrics atomically.
 
 -- | A sample of some metrics.
-type Sample = HM.HashMap Identifier Value
+type Sample = M.Map Identifier Value
 
 -- | Sample all metrics. Sampling is /not/ atomic in the sense that
 -- some metrics might have been mutated before they're sampled but
 -- after some other metrics have already been sampled.
 sampleAll :: State -> IO Sample
 sampleAll state = do
-    let metrics = HM.map fst $ stateMetrics state
+    let metrics = M.map fst $ stateMetrics state
         groups = stateGroups state
     cbSample <- sampleGroups $ M.elems groups
     sample <- readAllRefs metrics
-    let allSamples = sample ++ cbSample
-    return $! HM.fromList allSamples
+    let allSamples = M.union sample (M.fromList cbSample)
+    return $! allSamples
 
 -- | Sample all metric groups.
 sampleGroups :: [GroupSampler] -> IO [(Identifier, Value)]
@@ -385,7 +404,7 @@ sampleGroups cbSamplers = concat `fmap` mapM runOne cbSamplers
     runOne GroupSampler{..} = do
         a <- groupSampleAction
         return $! map (\ (identifier, f) -> (identifier, f a))
-                      (HM.toList groupSamplerMetrics)
+                      (M.toList groupSamplerMetrics)
 
 -- | The value of a sampled metric.
 data Value = Counter {-# UNPACK #-} !Int64
@@ -402,13 +421,12 @@ sampleOne (DistributionS m) = Distribution <$> m
 
 -- | Get a snapshot of all values.  Note that we're not guaranteed to
 -- see a consistent snapshot of the whole map.
-readAllRefs :: HM.HashMap Identifier (Either MetricSampler GroupId)
-            -> IO [(Identifier, Value)]
-readAllRefs m = do
-    forM ([(name, ref) | (name, Left ref) <- HM.toList m]) $
-        \(name, ref) -> do
-            val <- sampleOne ref
-            return (name, val)
+readAllRefs :: M.Map Identifier (Either MetricSampler GroupId)
+            -> IO (M.Map Identifier Value)
+readAllRefs = M.traverseMaybeWithKey $ \_k v ->
+  case v of
+    Left ref -> Just <$> sampleOne ref
+    Right _ -> pure Nothing
 
 ------------------------------------------------------------------------
 -- * Testing
@@ -418,9 +436,8 @@ readAllRefs m = do
 -- the form @pure x@ for some @x@.
 data SampledState = SampledState
      { sampledStateMetrics ::
-        !(HM.HashMap Identifier (Either Value GroupId, Version))
-     , sampledStateGroups ::
-        !(M.Map GroupId (HM.HashMap Identifier Value))
+        !(M.Map Identifier (Either Value GroupId, Version))
+     , sampledStateGroups :: !(M.Map GroupId (M.Map Identifier Value))
      , sampledStateNextGroupId :: !GroupId
      , sampledStateNextMetricVersion :: !Version
      }
@@ -448,10 +465,9 @@ sampleState State{..} = do
       value <- sampleOne sample
       pure (Left value, version)
 
-    sampleGroupSampler
-      :: GroupSampler -> IO (HM.HashMap Identifier Value)
+    sampleGroupSampler :: GroupSampler -> IO (M.Map Identifier Value)
     sampleGroupSampler GroupSampler{..} =
-      (\r -> HM.map ($ r) groupSamplerMetrics) <$> groupSampleAction
+      (\r -> M.map ($ r) groupSamplerMetrics) <$> groupSampleAction
 
 -- | Test for equality ignoring `MetricId`s and `GroupId`s.
 --
@@ -462,10 +478,10 @@ functionallyEqual state1 state2 = withoutIds state1 == withoutIds state2
   where
     withoutIds
       :: SampledState
-      -> HM.HashMap Identifier
-                    (Either Value (Maybe (HM.HashMap Identifier Value)))
+      -> M.Map Identifier
+                         (Either Value (Maybe (M.Map Identifier Value)))
     withoutIds state =
-      flip HM.map (sampledStateMetrics state) $
+      flip M.map (sampledStateMetrics state) $
         \(e, _) -> case e of
           Left value -> Left value
           Right groupId ->

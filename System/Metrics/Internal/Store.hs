@@ -65,10 +65,10 @@ module System.Metrics.Internal.Store
     , Value(..)
     ) where
 
-import qualified Data.HashMap.Strict as M
 import Data.Int (Int64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.List (foldl')
+import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import Prelude hiding (read)
 
@@ -174,9 +174,8 @@ registerGeneric identifier sample = Registration $ \state0 ->
     in  (state1, (:) handle)
 
 registerGroup
-    :: M.HashMap Identifier
-       (a -> Value)  -- ^ Metric names and getter functions.
-    -> IO a          -- ^ Action to sample the metric group
+    :: M.Map Identifier (a -> Value) -- ^ Metric names and getter functions
+    -> IO a -- ^ Action to sample the metric group
     -> Registration -- ^ Registration action
 registerGroup getters cb = Registration $ \state0 ->
     let (state1, handles) = Internal.registerGroup getters cb state0

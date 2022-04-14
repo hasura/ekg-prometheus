@@ -99,9 +99,10 @@ module System.Metrics
   ) where
 
 import Data.Coerce (coerce)
-import qualified Data.HashMap.Strict as M
+import qualified Data.HashMap.Strict as HM
 import Data.Int (Int64)
 import Data.Kind (Type)
+import qualified Data.Map.Strict as M
 import Data.Proxy
 import qualified Data.Text as T
 import GHC.Generics
@@ -249,10 +250,10 @@ type family MetricsImpl (t :: MetricType) where
 -- fromList [("key1","value1"),("key2","value2")]
 --
 class ToTags a where
-  toTags :: a -> M.HashMap T.Text T.Text
+  toTags :: a -> HM.HashMap T.Text T.Text
 
   default toTags ::
-    (Generic a, GToTags (Rep a)) => a -> M.HashMap T.Text T.Text
+    (Generic a, GToTags (Rep a)) => a -> HM.HashMap T.Text T.Text
   toTags x = gToTags undefined (from x)
   {-# INLINE toTags #-}
 
@@ -260,13 +261,13 @@ class ToTags a where
 --
 -- > toTags () = HashMap.empty
 instance ToTags () where
-  toTags () = M.empty
+  toTags () = HM.empty
   {-# INLINE toTags #-}
 
 -- | Place no constraints on tags.
 --
 -- > toTags @(HashMap Text Text) = id
-instance ToTags (M.HashMap T.Text T.Text) where
+instance ToTags (HM.HashMap T.Text T.Text) where
   toTags = id
   {-# INLINE toTags #-}
 
@@ -276,7 +277,7 @@ instance ToTags (M.HashMap T.Text T.Text) where
 -- | Deriving instances of `ToTags` for records that exclusively have
 -- fields of type `Text`.
 class GToTags (f :: Type -> Type) where
-  gToTags :: T.Text -> f x -> M.HashMap T.Text T.Text
+  gToTags :: T.Text -> f x -> HM.HashMap T.Text T.Text
 
 -- Data (passthrough)
 instance (GToTags f) => GToTags (D1 c f) where
@@ -290,7 +291,7 @@ instance (GToTags f) => GToTags (C1 c f) where
 
 -- Products (union)
 instance (GToTags f, GToTags g) => GToTags (f :*: g) where
-  gToTags name (x :*: y) = gToTags name x `M.union` gToTags name y
+  gToTags name (x :*: y) = gToTags name x `HM.union` gToTags name y
   {-# INLINE gToTags #-}
 
 -- Record selectors (take record selector name)
@@ -303,7 +304,7 @@ instance (GToTags f, KnownSymbol name) =>
 
 -- Individual fields (take value, combine with name)
 instance GToTags (K1 i T.Text) where
-  gToTags name (K1 x) = M.singleton name x
+  gToTags name (K1 x) = HM.singleton name x
   {-# INLINE gToTags #-}
 
 ------------------------------------------------------------------------

@@ -20,7 +20,8 @@ This document is a literate Haskell program:
 module Main where
 
 import Control.Exception (assert)
-import qualified Data.HashMap.Strict as M
+import qualified Data.HashMap.Strict as HM
+import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import Data.Kind (Type)
 import GHC.Generics (Generic)
@@ -132,8 +133,8 @@ app1 = do
 
   -- Verify the sample, just for this tutorial.
   let expectedSample = M.fromList
-        [ (Identifier "my_app.requests" M.empty, Counter 1)
-        , (Identifier "my_app.connections" M.empty, Gauge 99)
+        [ (Identifier "my_app.requests" HM.empty, Counter 1)
+        , (Identifier "my_app.connections" HM.empty, Gauge 99)
         ]
   assert (sample == expectedSample) $ pure ()
 ```
@@ -204,7 +205,7 @@ data AppMetrics2
 newtype EndpointTags = EndpointTags { endpoint :: T.Text }
 
 instance ToTags EndpointTags where
-  toTags (EndpointTags endpoint') = M.singleton "endpoint" endpoint'
+  toTags (EndpointTags endpoint') = HM.singleton "endpoint" endpoint'
 
 -- 3
 data DataSourceTags = DataSourceTags
@@ -259,17 +260,17 @@ app2 = do
   let expectedSample = M.fromList
         [ ( Identifier
               { idName = "requests"
-              , idTags = M.singleton "endpoint" "dev/harpsichord" }
+              , idTags = HM.singleton "endpoint" "dev/harpsichord" }
           , Counter 0
           )
         , ( Identifier
               { idName = "requests"
-              , idTags = M.singleton "endpoint" "dev/tabla" }
+              , idTags = HM.singleton "endpoint" "dev/tabla" }
           , Counter 1
           )
         , ( Identifier
               { idName = "total_connections"
-              , idTags = M.fromList
+              , idTags = HM.fromList
                   [ ("source_name", "myDB")
                   , ("conn_info", "localhost:5432") ] }
           , Gauge 99
@@ -318,8 +319,8 @@ app3 = do
 
   sample1 <- sampleAll store
   let expectedSample1 = M.fromList
-        [ (Identifier "my_app.requests" M.empty, Counter 1)
-        , (Identifier "my_app.connections" M.empty, Gauge 99)
+        [ (Identifier "my_app.requests" HM.empty, Counter 1)
+        , (Identifier "my_app.connections" HM.empty, Gauge 99)
         ]
   assert (sample1 == expectedSample1) $ pure ()
 
@@ -331,8 +332,8 @@ app3 = do
 
   sample2 <- sampleAll store
   let expectedSample2 = M.fromList
-        [ (Identifier "my_app.requests" M.empty, Counter 1)
-        , (Identifier "my_app.connections" M.empty, Gauge 5)
+        [ (Identifier "my_app.requests" HM.empty, Counter 1)
+        , (Identifier "my_app.connections" HM.empty, Gauge 5)
         ]
   assert (sample2 == expectedSample2) $ pure ()
 
@@ -341,7 +342,7 @@ app3 = do
 
   sample3 <- sampleAll store
   let expectedSample3 = M.fromList
-        [ (Identifier "my_app.connections" M.empty, Gauge 5)
+        [ (Identifier "my_app.connections" HM.empty, Gauge 5)
         ]
   assert (sample3 == expectedSample3) $ pure ()
 ```

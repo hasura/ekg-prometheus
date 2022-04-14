@@ -8,6 +8,7 @@ module Store
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race)
 import qualified Data.HashMap.Strict as HM
+import qualified Data.Map.Strict as M
 import Test.Hspec
 import Test.HUnit (assertEqual)
 
@@ -45,7 +46,7 @@ smokeTest = do
     , registerGauge (Identifier "rgauge" mempty) (pure 0)
     , registerLabel (Identifier "rlabel" mempty) (pure "")
     , registerDistribution (Identifier "rdistribution" mempty) (pure $ Stats 0 0 0 0 0 0)
-    , flip registerGroup (pure ()) $ HM.fromList
+    , flip registerGroup (pure ()) $ M.fromList
         [ (Identifier "group" (HM.singleton "gcounter" mempty), const (Counter 0))
         , (Identifier "group" (HM.singleton "ggauge" mempty), const (Gauge 0))
         ]
