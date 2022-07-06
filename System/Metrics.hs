@@ -65,8 +65,6 @@ module System.Metrics
   , Registration
   , registerCounter
   , registerGauge
-  , registerLabel
-  , registerDistribution
   , registerGroup
   , SamplingGroup (..)
   , MetricValue
@@ -75,8 +73,6 @@ module System.Metrics
     -- $convenience
   , createCounter
   , createGauge
-  , createLabel
-  , createDistribution
 
     -- -- ** Deregistering
     -- -- $deregistering
@@ -109,10 +105,8 @@ import GHC.Generics
 import qualified GHC.Stats as Stats
 import GHC.TypeLits
 import qualified System.Metrics.Counter as Counter
-import qualified System.Metrics.Distribution as Distribution
 import qualified System.Metrics.Gauge as Gauge
 import qualified System.Metrics.Internal.Store as Internal
-import qualified System.Metrics.Label as Label
 
 -- $overview
 -- Metrics are used to monitor program behavior and performance. All
@@ -197,8 +191,6 @@ data MetricType
 type family MetricValue (t :: MetricType) :: Type where
   MetricValue 'CounterType = Int64
   MetricValue 'GaugeType = Int64
-  MetricValue 'LabelType = T.Text
-  MetricValue 'DistributionType = Distribution.Stats
 
 -- | The `Metrics.Value` constructor for each metric.
 class ToMetricValue (t :: MetricType) where
@@ -206,15 +198,11 @@ class ToMetricValue (t :: MetricType) where
 
 instance ToMetricValue 'CounterType      where toMetricValue _ = Internal.Counter
 instance ToMetricValue 'GaugeType        where toMetricValue _ = Internal.Gauge
-instance ToMetricValue 'LabelType        where toMetricValue _ = Internal.Label
-instance ToMetricValue 'DistributionType where toMetricValue _ = Internal.Distribution
 
 -- | The default implementation of each metric.
 type family MetricsImpl (t :: MetricType) where
   MetricsImpl 'CounterType = Counter.Counter
   MetricsImpl 'GaugeType = Gauge.Gauge
-  MetricsImpl 'LabelType = Label.Label
-  MetricsImpl 'DistributionType = Distribution.Distribution
 
 ------------------------------------------------------------------------
 -- ** Tags
@@ -462,26 +450,6 @@ registerGauge
   -> Registration metrics
 registerGauge = registerGeneric Internal.registerGauge
 
--- | Register a text metric. The provided action to read the value
--- must be thread-safe. Also see 'createLabel'.
-registerLabel
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'LabelType tags -- ^ Metric class
-  -> tags -- ^ Tags
-  -> IO T.Text -- ^ Action to read the current metric value
-  -> Registration metrics
-registerLabel = registerGeneric Internal.registerLabel
-
--- | Register a distribution metric. The provided action to read the
--- value must be thread-safe. Also see 'createDistribution'.
-registerDistribution
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'DistributionType tags -- ^ Metric class
-  -> tags -- ^ Tags
-  -> IO Distribution.Stats -- ^ Action to read the current metric value
-  -> Registration metrics
-registerDistribution = registerGeneric Internal.registerDistribution
-
 registerGeneric
   :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
   => ( Internal.Identifier
@@ -611,24 +579,6 @@ createGauge
   -> Store metrics -- ^ Metric store
   -> IO Gauge.Gauge
 createGauge = createGeneric Internal.createGauge
-
--- | Create and register an empty label.
-createLabel
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'LabelType tags -- ^ Metric class
-  -> tags -- ^ Tags
-  -> Store metrics -- ^ Metric store
-  -> IO Label.Label
-createLabel = createGeneric Internal.createLabel
-
--- | Create and register an event tracker.
-createDistribution
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'DistributionType tags -- ^ Metric class
-  -> tags -- ^ Tags
-  -> Store metrics -- ^ Metric store
-  -> IO Distribution.Distribution
-createDistribution = createGeneric Internal.createDistribution
 
 createGeneric
   :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)

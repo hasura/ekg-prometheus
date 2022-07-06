@@ -39,12 +39,9 @@ library
   exposed-modules:
     System.Metrics
     System.Metrics.Counter
-    System.Metrics.Distribution
-    System.Metrics.Distribution.Internal
     System.Metrics.Gauge
     System.Metrics.Internal.State
     System.Metrics.Internal.Store
-    System.Metrics.Label
 
   other-modules:
     Data.Array
@@ -75,18 +72,6 @@ benchmark counter
   hs-source-dirs: benchmark-exe
   ghc-options: -O2 -threaded
 
-benchmark distribution
-  import: common-all
-  main-is: Distribution.hs
-  type: exitcode-stdio-1.0
-  build-depends:
-    base,
-    ekg-core,
-    ekg-core-benchmark,
-    criterion ^>= 1.5.9.0
-  hs-source-dirs: benchmark-exe
-  ghc-options: -O2 -threaded
-
 test-suite ekg-core-test
   import: common-all
   type: exitcode-stdio-1.0
@@ -94,7 +79,6 @@ test-suite ekg-core-test
   main-is: Spec.hs
   other-modules:
     Counter
-    Distribution
     State
     Store
   build-depends:

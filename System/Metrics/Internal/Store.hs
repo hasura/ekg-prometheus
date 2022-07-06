@@ -41,16 +41,12 @@ module System.Metrics.Internal.Store
     , register
     , registerCounter
     , registerGauge
-    , registerLabel
-    , registerDistribution
     , registerGroup
 
       -- ** Convenience functions
       -- $convenience
     , createCounter
     , createGauge
-    , createLabel
-    , createDistribution
 
       -- * Deregistering metrics
     , Deregistration
@@ -74,15 +70,11 @@ import Prelude hiding (read)
 
 import System.Metrics.Counter (Counter)
 import qualified System.Metrics.Counter as Counter
-import System.Metrics.Distribution (Distribution)
-import qualified System.Metrics.Distribution as Distribution
 import System.Metrics.Gauge (Gauge)
 import qualified System.Metrics.Gauge as Gauge
 import System.Metrics.Internal.State
   hiding (deregister, deregisterByName, register, registerGroup, sampleAll)
 import qualified System.Metrics.Internal.State as Internal
-import System.Metrics.Label (Label)
-import qualified System.Metrics.Label as Label
 
 ------------------------------------------------------------------------
 -- * The metric store
@@ -148,23 +140,6 @@ registerGauge :: Identifier -- ^ Gauge identifier
 registerGauge identifier sample =
     registerGeneric identifier (GaugeS sample)
 
--- | Register a text metric. The provided action to read the value
--- must be thread-safe. Also see 'createLabel'.
-registerLabel :: Identifier -- ^ Label identifier
-              -> IO T.Text  -- ^ Action to read the current metric value
-              -> Registration -- ^ Registration action
-registerLabel identifier sample =
-    registerGeneric identifier (LabelS sample)
-
--- | Register a distribution metric. The provided action to read the
--- value must be thread-safe. Also see 'createDistribution'.
-registerDistribution
-    :: Identifier             -- ^ Distribution identifier
-    -> IO Distribution.Stats  -- ^ Action to read the current metric
-    -> Registration -- ^ Registration action
-registerDistribution identifier sample =
-    registerGeneric identifier (DistributionS sample)
-
 registerGeneric
   :: Identifier -- ^ Metric identifier
   -> MetricSampler -- ^ Sampling action
@@ -209,26 +184,6 @@ createGauge identifier store = do
     _ <- register store $
           registerGauge identifier (Gauge.read gauge)
     return gauge
-
--- | Create and register an empty label.
-createLabel :: Identifier -- ^ Label identifier
-            -> Store      -- ^ Metric store
-            -> IO Label
-createLabel identifier store = do
-    label <- Label.new
-    _ <- register store $
-          registerLabel identifier (Label.read label)
-    return label
-
--- | Create and register an event tracker.
-createDistribution :: Identifier -- ^ Distribution identifier
-                   -> Store      -- ^ Metric store
-                   -> IO Distribution
-createDistribution identifier store = do
-    event <- Distribution.new
-    _ <- register store $
-          registerDistribution identifier (Distribution.read event)
-    return event
 
 ------------------------------------------------------------------------
 -- * Deregistering metrics

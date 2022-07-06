@@ -12,7 +12,6 @@ import qualified Data.Map.Strict as M
 import Test.Hspec
 import Test.HUnit (assertEqual)
 
-import System.Metrics.Distribution.Internal
 import System.Metrics.Internal.Store
 
 tests :: Spec
@@ -34,18 +33,12 @@ smokeTest = do
 
   let counterIdentifier = Identifier "ccounter" mempty
       gaugeIdentifier = Identifier "cgauge" mempty
-      labelIdentifier = Identifier "clabel" mempty
-      distributionIdentifier = Identifier "cdistribution" mempty
   !_ <- createCounter counterIdentifier store
   !_ <- createCounter gaugeIdentifier store
-  !_ <- createCounter labelIdentifier store
-  !_ <- createCounter distributionIdentifier store
 
   deregistrationHandle <- register store $ mconcat
     [ registerCounter (Identifier "rcounter" mempty) (pure 0)
     , registerGauge (Identifier "rgauge" mempty) (pure 0)
-    , registerLabel (Identifier "rlabel" mempty) (pure "")
-    , registerDistribution (Identifier "rdistribution" mempty) (pure $ Stats 0 0 0 0 0 0)
     , flip registerGroup (pure ()) $ M.fromList
         [ (Identifier "group" (HM.singleton "gcounter" mempty), const (Counter 0))
         , (Identifier "group" (HM.singleton "ggauge" mempty), const (Gauge 0))
@@ -56,5 +49,5 @@ smokeTest = do
 
   deregister store $
     deregisterMetric counterIdentifier <>
-    deregisterByName (idName distributionIdentifier)
+    deregisterByName (idName gaugeIdentifier)
   deregistrationHandle
