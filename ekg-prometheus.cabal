@@ -1,6 +1,6 @@
 cabal-version:       2.2
-name:                ekg-core
-version:             0.1.1.7
+name:                ekg-prometheus
+version:             0.1.0.0
 synopsis:            Tracking of system metrics
 description:
   This library lets you defined and track system metrics.
@@ -14,7 +14,7 @@ maintainer:          Johan Tibell <johan.tibell@gmail.com>,
 category:            System
 build-type:          Simple
 extra-source-files:  CHANGES.md
-tested-with:         GHC == 8.10.2, GHC == 8.8.3, GHC == 8.6.5,
+tested-with:         GHC == 8.10.7, GHC == 8.8.3, GHC == 8.6.5,
                      GHC == 8.4.4,  GHC == 8.2.2
 
 common common-all
@@ -54,14 +54,14 @@ library
     System.Metrics.SimpleExample
     System.Metrics.ThreadId
 
-library ekg-core-benchmark
+library ekg-prometheus-benchmark
   import: common-all
   hs-source-dirs: benchmark-lib
   exposed-modules:
     Tasks
   build-depends:
     base,
-    ekg-core
+    ekg-prometheus
 
 benchmark counter
   import: common-all
@@ -69,13 +69,13 @@ benchmark counter
   type: exitcode-stdio-1.0
   build-depends:
     base,
-    ekg-core,
-    ekg-core-benchmark,
+    ekg-prometheus,
+    ekg-prometheus-benchmark,
     criterion ^>= 1.5.9.0
   hs-source-dirs: benchmark-exe
   ghc-options: -O2 -threaded
 
-test-suite ekg-core-test
+test-suite ekg-prometheus-test
   import: common-all
   type: exitcode-stdio-1.0
   hs-source-dirs: test
@@ -87,8 +87,8 @@ test-suite ekg-core-test
     Store
   build-depends:
     base,
-    ekg-core,
-    ekg-core-benchmark,
+    ekg-prometheus,
+    ekg-prometheus-benchmark,
     async ^>= 2.2.1,
     bytestring ^>= 0.10.12.0,
     containers >= 0.5 && < 0.7,
@@ -101,13 +101,13 @@ test-suite ekg-core-test
     unordered-containers < 0.3
   ghc-options: -O2 -threaded -with-rtsopts=-N
 
-test-suite ekg-core-tutorial
+test-suite ekg-prometheus-tutorial
   import: common-all, library-build-depends
   type: exitcode-stdio-1.0
   main-is: Tutorial.lhs
   build-depends:
-    ekg-core,
-    ekg-core-benchmark,
+    ekg-prometheus,
+    ekg-prometheus-benchmark,
     markdown-unlit
   ghc-options:
     -pgmL markdown-unlit
