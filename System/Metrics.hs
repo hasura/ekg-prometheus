@@ -65,6 +65,7 @@ module System.Metrics
   , Registration
   , registerCounter
   , registerGauge
+  , registerHistogram
   , registerGroup
   , SamplingGroup (..)
   , MetricValue
@@ -73,6 +74,7 @@ module System.Metrics
     -- $convenience
   , createCounter
   , createGauge
+  , createHistogram
 
     -- -- ** Deregistering
     -- -- $deregistering
@@ -106,6 +108,8 @@ import qualified GHC.Stats as Stats
 import GHC.TypeLits
 import qualified System.Metrics.Counter as Counter
 import qualified System.Metrics.Gauge as Gauge
+import System.Metrics.Histogram (HistogramSample)
+import qualified System.Metrics.Histogram as Histogram
 import qualified System.Metrics.Internal.Store as Internal
 
 -- $overview
@@ -153,7 +157,7 @@ import qualified System.Metrics.Internal.Store as Internal
 -- set of metrics should define a register method, in the style of
 -- 'registerGcMetrics', that registers the metrics in the 'Store'. The
 -- register function should document which metrics are registered and
--- their types (i.e. counter, gauge, label, or distribution).
+-- their types (i.e. counter, gauge, or histogram).
 --
 -- References to metric stores are parameterized a type that restricts
 -- the kinds of metrics that may be added to or removed from the `Store`
@@ -184,25 +188,27 @@ newStore = Store <$> Internal.newStore
 data MetricType
   = CounterType
   | GaugeType
-  | LabelType
-  | DistributionType
+  | HistogramType
 
 -- | The type of values sampled by each metric.
 type family MetricValue (t :: MetricType) :: Type where
   MetricValue 'CounterType = Int64
   MetricValue 'GaugeType = Int64
+  MetricValue 'HistogramType = HistogramSample
 
 -- | The `Metrics.Value` constructor for each metric.
 class ToMetricValue (t :: MetricType) where
   toMetricValue :: Proxy t -> MetricValue t -> Internal.Value
 
-instance ToMetricValue 'CounterType      where toMetricValue _ = Internal.Counter
-instance ToMetricValue 'GaugeType        where toMetricValue _ = Internal.Gauge
+instance ToMetricValue 'CounterType   where toMetricValue _ = Internal.Counter
+instance ToMetricValue 'GaugeType     where toMetricValue _ = Internal.Gauge
+instance ToMetricValue 'HistogramType where toMetricValue _ = Internal.Histogram
 
 -- | The default implementation of each metric.
 type family MetricsImpl (t :: MetricType) where
   MetricsImpl 'CounterType = Counter.Counter
   MetricsImpl 'GaugeType = Gauge.Gauge
+  MetricsImpl 'HistogramType = Histogram.Histogram
 
 ------------------------------------------------------------------------
 -- ** Tags
@@ -450,6 +456,16 @@ registerGauge
   -> Registration metrics
 registerGauge = registerGeneric Internal.registerGauge
 
+-- | Register an integer-valued metric. The provided action to read
+-- the value must be thread-safe. Also see 'createGauge'.
+registerHistogram
+  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
+  => metrics name 'HistogramType tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> IO HistogramSample -- ^ Action to read the current metric value
+  -> Registration metrics
+registerHistogram = registerGeneric Internal.registerHistogram
+
 registerGeneric
   :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
   => ( Internal.Identifier
@@ -579,6 +595,18 @@ createGauge
   -> Store metrics -- ^ Metric store
   -> IO Gauge.Gauge
 createGauge = createGeneric Internal.createGauge
+
+-- | Create and register an empty histogram. The buckets of the
+-- histogram are fixed and defined by the given upper bounds.
+createHistogram
+  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
+  => [Histogram.UpperBound] -- ^ Upper bounds of buckets
+  -> metrics name 'HistogramType tags -- ^ Metric class
+  -> tags -- ^ Tags
+  -> Store metrics -- ^ Metric store
+  -> IO Histogram.Histogram
+createHistogram upperBounds =
+  createGeneric (Internal.createHistogram upperBounds)
 
 createGeneric
   :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)

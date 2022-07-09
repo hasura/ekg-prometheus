@@ -57,7 +57,10 @@ import qualified Data.Text.Encoding as T
 import System.Metrics
   ( Identifier (Identifier, idName),
     Sample,
-    Value (Counter, Gauge),
+    Value (Counter, Gauge, Histogram),
+  )
+import System.Metrics.Histogram
+  ( HistogramSample (histBuckets, histCount, histSum)
   )
 
 ------------------------------------------------------------------------------
@@ -99,6 +102,9 @@ import System.Metrics
 -- @Counter@, with value @10@;
 -- (3) a metric named @my.counter@, with tags @{tag.name.1="tag value 2", tag.name.2="tag value 2"}@, of type
 -- @Counter@, with value @11@;
+-- (4) a metric named @my.histogram@, with tags @{tag="value"}@, of type
+-- @Histogram@, with bucket upper bounds of @[1, 2, 3]@, and
+-- observations @[1, 2, 3, 4]@;
 --
 -- is encoded as follows:
 --
@@ -106,8 +112,16 @@ import System.Metrics
 -- > _100gauge 100.0
 -- >
 -- > # TYPE my_counter counter
--- > my_counter{tag_name_1=\"tag value 1\",tag_name_2=\"tag value 1\"} 10.0
--- > my_counter{tag_name_1=\"tag value 2\",tag_name_2=\"tag value 2\"} 11.0
+-- > my_counter{tag_name_1="tag value 1",tag_name_2="tag value 1"} 10.0
+-- > my_counter{tag_name_1="tag value 2",tag_name_2="tag value 2"} 11.0
+-- >
+-- > # TYPE my_histogram histogram
+-- > my_histogram_bucket{tag="value",le="1.0"} 1.0
+-- > my_histogram_bucket{tag="value",le="2.0"} 2.0
+-- > my_histogram_bucket{tag="value",le="3.0"} 3.0
+-- > my_histogram_bucket{tag="value",le="+Inf"} 4.0
+-- > my_histogram_sum{tag="value"} 10.0
+-- > my_histogram_count{tag="value"} 4.0
 --
 sampleToPrometheus :: Sample -> B.Builder
 sampleToPrometheus =
@@ -132,6 +146,9 @@ data GroupedMetric
   | GroupedGauge
       T.Text -- Metric name
       [(Tags, Int64)]
+  | GroupedHistogram
+      T.Text -- Metric name
+      [(Tags, HistogramSample)]
 
 -- Within a sample, metrics with the name should have the same metric
 -- type, but this is not guaranteed. To handle the case where two
@@ -152,6 +169,11 @@ makeGroupedMetric xs@((Identifier metricName _, headVal):_) =
         GroupedGauge metricName $
           flip mapMaybe xs $ \(Identifier _ tags, val) ->
             sequence (tags, getGaugeValue val)
+    Histogram _ ->
+      Just $
+        GroupedHistogram metricName $
+          flip mapMaybe xs $ \(Identifier _ tags, val) ->
+            sequence (tags, getHistogramValue val)
 makeGroupedMetric [] =
   -- This should not happen: `groupBy` only produces only non-empty
   -- lists.
@@ -167,6 +189,11 @@ getGaugeValue = \case
   Gauge i -> Just i
   _ -> Nothing
 
+getHistogramValue :: Value -> Maybe HistogramSample
+getHistogramValue = \case
+  Histogram hs -> Just hs
+  _ -> Nothing
+
 ------------------------------------------------------------------------------
 
 exportGroupedMetric :: GroupedMetric -> B.Builder
@@ -175,6 +202,8 @@ exportGroupedMetric = \case
     exportCounter metricName $ map (second fromIntegral) tagsAndValues
   GroupedGauge metricName tagsAndValues ->
     exportGauge metricName $ map (second fromIntegral) tagsAndValues
+  GroupedHistogram metricName tagsAndValues ->
+    exportHistogram metricName tagsAndValues
 
 -- Prometheus counter samples
 exportCounter :: T.Text -> [(Tags, Double)] -> B.Builder
@@ -193,6 +222,34 @@ exportGauge metricName tagsAndValues =
       (\(tags, value) ->
         metricSampleLine metricName tags (double value))
       tagsAndValues
+
+-- Prometheus histogram samples
+exportHistogram :: T.Text -> [(Tags, HistogramSample)] -> B.Builder
+exportHistogram metricName tagsAndValues =
+  mappend (metricTypeLine "histogram" metricName) $
+    flip foldMap tagsAndValues $ \(tags, histSample) ->
+      mconcat
+        [ flip foldMap (M.toList (histBuckets histSample)) $
+            \(upperBound, count) ->
+              metricSampleLine
+                metricName_bucket
+                (HM.insert "le" (T.pack (show upperBound)) tags)
+                (double count)
+        , metricSampleLine
+            metricName_bucket
+            (HM.insert "le" "+Inf" tags)
+            (double (fromIntegral (histCount histSample)))
+        , metricSampleLine
+            (metricName <> "_sum")
+            tags
+            (double (histSum histSample))
+        , metricSampleLine
+            (metricName <> "_count")
+            tags
+            (double (fromIntegral (histCount histSample)))
+        ]
+  where
+    metricName_bucket = metricName <> "_bucket"
 
 ------------------------------------------------------------------------------
 

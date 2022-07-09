@@ -55,6 +55,7 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import GHC.Generics
 import Prelude hiding (read)
+import System.Metrics.Histogram (HistogramSample)
 
 ------------------------------------------------------------------------
 -- * The metric store state
@@ -103,6 +104,8 @@ data MetricSampler
     -- ^ Action to sample a counter
   | GaugeS !(IO Int64)
     -- ^ Action to sample a gauge
+  | HistogramS !(IO HistogramSample)
+    -- ^ Action to sample a histogram
 
 -- | An action to sample a group of metrics together.
 --
@@ -403,11 +406,13 @@ sampleGroups cbSamplers = concat `fmap` mapM runOne cbSamplers
 -- | The value of a sampled metric.
 data Value = Counter {-# UNPACK #-} !Int64
            | Gauge {-# UNPACK #-} !Int64
+           | Histogram !HistogramSample
            deriving (Eq, Show)
 
 sampleOne :: MetricSampler -> IO Value
 sampleOne (CounterS m)      = Counter <$> m
 sampleOne (GaugeS m)        = Gauge <$> m
+sampleOne (HistogramS m)    = Histogram <$> m
 
 -- | Get a snapshot of all values.  Note that we're not guaranteed to
 -- see a consistent snapshot of the whole map.

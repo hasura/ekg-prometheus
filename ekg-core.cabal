@@ -42,6 +42,7 @@ library
     System.Metrics.Counter
     System.Metrics.Export
     System.Metrics.Gauge
+    System.Metrics.Histogram
     System.Metrics.Internal.State
     System.Metrics.Internal.Store
 

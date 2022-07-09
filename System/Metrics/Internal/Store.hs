@@ -41,12 +41,14 @@ module System.Metrics.Internal.Store
     , register
     , registerCounter
     , registerGauge
+    , registerHistogram
     , registerGroup
 
       -- ** Convenience functions
       -- $convenience
     , createCounter
     , createGauge
+    , createHistogram
 
       -- * Deregistering metrics
     , Deregistration
@@ -72,6 +74,8 @@ import System.Metrics.Counter (Counter)
 import qualified System.Metrics.Counter as Counter
 import System.Metrics.Gauge (Gauge)
 import qualified System.Metrics.Gauge as Gauge
+import System.Metrics.Histogram (Histogram, HistogramSample)
+import qualified System.Metrics.Histogram as Histogram
 import System.Metrics.Internal.State
   hiding (deregister, deregisterByName, register, registerGroup, sampleAll)
 import qualified System.Metrics.Internal.State as Internal
@@ -140,6 +144,14 @@ registerGauge :: Identifier -- ^ Gauge identifier
 registerGauge identifier sample =
     registerGeneric identifier (GaugeS sample)
 
+-- | Register a histogram metric. The provided action to read the value
+-- must be thread-safe. Also see 'createHistogram.
+registerHistogram :: Identifier -- ^ Histogram identifier
+                  -> IO HistogramSample -- ^ Action to read the current metric value
+                  -> Registration -- ^ Registration action
+registerHistogram identifier sample =
+    registerGeneric identifier (HistogramS sample)
+
 registerGeneric
   :: Identifier -- ^ Metric identifier
   -> MetricSampler -- ^ Sampling action
@@ -184,6 +196,18 @@ createGauge identifier store = do
     _ <- register store $
           registerGauge identifier (Gauge.read gauge)
     return gauge
+
+-- | Create and register an empty histogram. The buckets of the
+-- histogram are fixed and defined by the given upper bounds.
+createHistogram :: [Histogram.UpperBound] -- ^ Upper bounds of buckets
+                -> Identifier -- ^ Histogram identifier
+                -> Store      -- ^ Metric store
+                -> IO Histogram
+createHistogram upperBounds identifier store = do
+    histogram <- Histogram.new upperBounds
+    _ <- register store $
+          registerHistogram identifier (Histogram.read histogram)
+    return histogram
 
 ------------------------------------------------------------------------
 -- * Deregistering metrics
