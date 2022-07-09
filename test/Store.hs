@@ -34,7 +34,7 @@ smokeTest = do
   let counterIdentifier = Identifier "ccounter" mempty
       gaugeIdentifier = Identifier "cgauge" mempty
   !_ <- createCounter counterIdentifier store
-  !_ <- createCounter gaugeIdentifier store
+  !_ <- createGauge gaugeIdentifier store
 
   deregistrationHandle <- register store $ mconcat
     [ registerCounter (Identifier "rcounter" mempty) (pure 0)
