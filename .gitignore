@@ -9,6 +9,7 @@
 /dist/*
 cabal.config
 cabal.sandbox.config
+dist-newstyle
 examples/Group
 *.sublime-*
 
