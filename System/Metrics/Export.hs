@@ -49,7 +49,9 @@ import Data.Char (isDigit)
 import Data.Function (on)
 import qualified Data.HashMap.Strict as HM
 import Data.Int (Int64)
-import Data.List (groupBy, intersperse)
+import Data.List (intersperse)
+import Data.List.NonEmpty (NonEmpty ((:|)))
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as M
 import Data.Maybe (mapMaybe)
 import qualified Data.Text as T
@@ -127,12 +129,15 @@ sampleToPrometheus :: Sample -> B.Builder
 sampleToPrometheus =
   mconcat
     . intersperse newline
-    . map exportGroupedMetric
-    . mapMaybe (makeGroupedMetric . map (first sanitizeIdentifier))
-    -- Note: This call to 'groupBy' relies on the lexicographic ordering
+    . map
+        ( exportGroupedMetric
+        . makeGroupedMetric
+        . NonEmpty.map (first sanitizeIdentifier)
+        )
+    -- Note: This use of 'groupBy' relies on the lexicographic ordering
     -- defined on the 'Identifier' type, which considers the metric name
     -- first.
-    . groupBy ((==) `on` (idName . fst))
+    . NonEmpty.groupBy ((==) `on` (idName . fst))
     . M.toAscList
 
 type Tags = HM.HashMap T.Text T.Text
@@ -156,28 +161,23 @@ data GroupedMetric
 -- choose, for each metric name, one of its metric types, and discard
 -- all the metrics of that name that do not have that type.
 --
-makeGroupedMetric :: [(Identifier, Value)] -> Maybe GroupedMetric
-makeGroupedMetric xs@((Identifier metricName _, headVal):_) =
+makeGroupedMetric :: NonEmpty (Identifier, Value) -> GroupedMetric
+makeGroupedMetric xs@((Identifier metricName _, headVal) :| _) =
   case headVal of
     Counter _ ->
-      Just $
-        GroupedCounter metricName $
-          flip mapMaybe xs $ \(Identifier _ tags, val) ->
-            sequence (tags, getCounterValue val)
+      GroupedCounter metricName $
+        flip mapMaybe xs_list $ \(Identifier _ tags, val) ->
+          sequence (tags, getCounterValue val)
     Gauge _ ->
-      Just $
-        GroupedGauge metricName $
-          flip mapMaybe xs $ \(Identifier _ tags, val) ->
-            sequence (tags, getGaugeValue val)
+      GroupedGauge metricName $
+        flip mapMaybe xs_list $ \(Identifier _ tags, val) ->
+          sequence (tags, getGaugeValue val)
     Histogram _ ->
-      Just $
-        GroupedHistogram metricName $
-          flip mapMaybe xs $ \(Identifier _ tags, val) ->
-            sequence (tags, getHistogramValue val)
-makeGroupedMetric [] =
-  -- This should not happen: `groupBy` only produces only non-empty
-  -- lists.
-  Nothing
+      GroupedHistogram metricName $
+        flip mapMaybe xs_list $ \(Identifier _ tags, val) ->
+          sequence (tags, getHistogramValue val)
+  where
+    xs_list = NonEmpty.toList xs
 
 getCounterValue :: Value -> Maybe Int64
 getCounterValue = \case
