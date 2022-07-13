@@ -38,21 +38,21 @@ common library-build-depends
 library
   import: common-all, library-build-depends
   exposed-modules:
-    System.Metrics
-    System.Metrics.Counter
-    System.Metrics.Export
-    System.Metrics.Gauge
-    System.Metrics.Histogram
-    System.Metrics.Internal.State
-    System.Metrics.Internal.Store
+    System.Metrics.Prometheus
+    System.Metrics.Prometheus.Counter
+    System.Metrics.Prometheus.Export
+    System.Metrics.Prometheus.Gauge
+    System.Metrics.Prometheus.Histogram
+    System.Metrics.Prometheus.Internal.State
+    System.Metrics.Prometheus.Internal.Store
 
   other-modules:
     Data.Array
     Data.Atomic
-    System.Metrics.Example
-    System.Metrics.GroupExample
-    System.Metrics.SimpleExample
-    System.Metrics.ThreadId
+    System.Metrics.Prometheus.Example
+    System.Metrics.Prometheus.GroupExample
+    System.Metrics.Prometheus.SimpleExample
+    System.Metrics.Prometheus.ThreadId
 
 library ekg-prometheus-benchmark
   import: common-all

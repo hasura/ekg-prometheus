@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 import qualified Data.HashMap.Strict as M
 import GHC.Stats
-import System.Metrics
+import System.Metrics.Prometheus
 
 main = do
     store <- newStore

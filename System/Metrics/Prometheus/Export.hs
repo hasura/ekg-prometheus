@@ -38,7 +38,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module System.Metrics.Export
+module System.Metrics.Prometheus.Export
   ( sampleToPrometheus
   , escapeTagValue
   ) where
@@ -56,12 +56,12 @@ import qualified Data.Map.Strict as M
 import Data.Maybe (mapMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import System.Metrics
+import System.Metrics.Prometheus
   ( Identifier (Identifier, idName),
     Sample,
     Value (Counter, Gauge, Histogram),
   )
-import System.Metrics.Histogram
+import System.Metrics.Prometheus.Histogram
   ( HistogramSample (histBuckets, histCount, histSum)
   )
 

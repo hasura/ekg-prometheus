@@ -7,7 +7,7 @@ module Tasks
 import Control.Concurrent
 import Control.Monad
 import Data.Int (Int64)
-import qualified System.Metrics.Counter as C
+import qualified System.Metrics.Prometheus.Counter as C
 
 -- | Perform 100,000 atomic increments using 100 concurrent writers, and
 -- check the final count.

@@ -1,5 +1,5 @@
 {-
-The module is based on the System.Metrics.Prometheus.Metric.Histogram
+The module is based on the System.Metrics.Prometheus.Prometheus.Metric.Histogram
 module of the prometheus-2.2.3 package:
 
 https://hackage.haskell.org/package/prometheus-2.2.3
@@ -39,7 +39,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 {-# LANGUAGE TupleSections #-}
 
-module System.Metrics.Histogram
+module System.Metrics.Prometheus.Histogram
     ( Histogram
     , HistogramSample (..)
     , UpperBound

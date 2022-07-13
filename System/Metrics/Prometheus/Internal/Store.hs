@@ -1,9 +1,9 @@
 {-# OPTIONS_HADDOCK hide #-}
 -- |
 -- This module defines the metrics store and all of its operations using
--- the state type defined in "System.Metrics.Internal.State". The
+-- the state type defined in "System.Metrics.Prometheus.Internal.State". The
 -- interface presented in this module is then restricted in
--- "System.Metrics.Static" to produce the final interface.
+-- "System.Metrics.Prometheus.Static" to produce the final interface.
 --
 -- = Warning
 --
@@ -21,11 +21,11 @@
 --   then run such compositions atomically using `atomicModifyIORef'`.
 --   This allows for atomic operations on the `Store`.
 --
--- * We bind the `Handle`s of "System.Metrics.Internal.State" to
+-- * We bind the `Handle`s of "System.Metrics.Prometheus.Internal.State" to
 --   specific `IORef`s in `deregisterHandles`, preventing the confusion of
 --   handles from different `Store`s.
 
-module System.Metrics.Internal.Store
+module System.Metrics.Prometheus.Internal.Store
     (
       -- * The metric store
       -- $metric-store
@@ -70,15 +70,15 @@ import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import Prelude hiding (read)
 
-import System.Metrics.Counter (Counter)
-import qualified System.Metrics.Counter as Counter
-import System.Metrics.Gauge (Gauge)
-import qualified System.Metrics.Gauge as Gauge
-import System.Metrics.Histogram (Histogram, HistogramSample)
-import qualified System.Metrics.Histogram as Histogram
-import System.Metrics.Internal.State
+import System.Metrics.Prometheus.Counter (Counter)
+import qualified System.Metrics.Prometheus.Counter as Counter
+import System.Metrics.Prometheus.Gauge (Gauge)
+import qualified System.Metrics.Prometheus.Gauge as Gauge
+import System.Metrics.Prometheus.Histogram (Histogram, HistogramSample)
+import qualified System.Metrics.Prometheus.Histogram as Histogram
+import System.Metrics.Prometheus.Internal.State
   hiding (deregister, deregisterByName, register, registerGroup, sampleAll)
-import qualified System.Metrics.Internal.State as Internal
+import qualified System.Metrics.Prometheus.Internal.State as Internal
 
 ------------------------------------------------------------------------
 -- * The metric store
@@ -173,7 +173,7 @@ registerGroup getters cb = Registration $ \state0 ->
 
 -- $convenience
 -- These functions combined the creation of a mutable reference (e.g.
--- a `System.Metrics.Counter.Counter`) with registering that reference
+-- a `System.Metrics.Prometheus.Counter.Counter`) with registering that reference
 -- in the store in one convenient function. The deregistration handles
 -- are discarded.
 

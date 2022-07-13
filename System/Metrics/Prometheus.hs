@@ -22,12 +22,12 @@
 
 -- Implementation note:
 -- This module merely wraps and restricts the interface of
--- "System.Metrics.Internal.Store". That is, the functions presented in
+-- "System.Metrics.Prometheus.Internal.Store". That is, the functions presented in
 -- this interface are exactly the same as their counterparts in
--- "System.Metrics", except that they have been restricted to work on
+-- "System.Metrics.Prometheus", except that they have been restricted to work on
 -- only a narrow, user-defined set of inputs.
 
-module System.Metrics
+module System.Metrics.Prometheus
   (
     -- * Overview
     -- $overview
@@ -106,11 +106,11 @@ import qualified Data.Text as T
 import GHC.Generics
 import qualified GHC.Stats as Stats
 import GHC.TypeLits
-import qualified System.Metrics.Counter as Counter
-import qualified System.Metrics.Gauge as Gauge
-import System.Metrics.Histogram (HistogramSample)
-import qualified System.Metrics.Histogram as Histogram
-import qualified System.Metrics.Internal.Store as Internal
+import qualified System.Metrics.Prometheus.Counter as Counter
+import qualified System.Metrics.Prometheus.Gauge as Gauge
+import System.Metrics.Prometheus.Histogram (HistogramSample)
+import qualified System.Metrics.Prometheus.Histogram as Histogram
+import qualified System.Metrics.Prometheus.Internal.Store as Internal
 
 -- $overview
 -- Metrics are used to monitor program behavior and performance. All
@@ -231,7 +231,7 @@ type family MetricsImpl (t :: MetricType) where
 -- > import qualified Data.Text as T
 -- > import GHC.Generics
 -- >
--- > import System.Metrics
+-- > import System.Metrics.Prometheus
 -- >
 -- > data MyTags = MyTags
 -- >   { key1 :: T.Text
@@ -574,7 +574,7 @@ instance
 
 -- $convenience
 -- These functions combined the creation of a mutable reference (e.g.
--- a `System.Metrics.Counter.Counter`) with registering that reference
+-- a `System.Metrics.Prometheus.Counter.Counter`) with registering that reference
 -- in the store in one convenient function. The deregistration handles
 -- are discarded.
 

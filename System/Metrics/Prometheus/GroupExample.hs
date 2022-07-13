@@ -2,14 +2,14 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 
-module System.Metrics.GroupExample
+module System.Metrics.Prometheus.GroupExample
   ( main
   ) where
 
 import Data.Kind (Type)
 import GHC.Stats
 import GHC.TypeLits (Symbol)
-import System.Metrics
+import System.Metrics.Prometheus
 
 data RTSMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
   RTSGcs :: RTSMetrics "gcs" 'CounterType ()

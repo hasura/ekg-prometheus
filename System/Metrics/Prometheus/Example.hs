@@ -4,7 +4,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module System.Metrics.Example
+module System.Metrics.Prometheus.Example
   ( main
   ) where
 
@@ -12,9 +12,9 @@ import Data.Kind (Type)
 import qualified Data.Text as T
 import GHC.Generics
 import GHC.TypeLits
-import qualified System.Metrics.Counter as Counter
-import qualified System.Metrics.Gauge as Gauge
-import System.Metrics
+import qualified System.Metrics.Prometheus.Counter as Counter
+import qualified System.Metrics.Prometheus.Gauge as Gauge
+import System.Metrics.Prometheus
 
 -- Custom type describing a set of classes of metrics.
 data MyMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where

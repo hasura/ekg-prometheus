@@ -14,11 +14,11 @@ import Data.Foldable (for_)
 import Data.Kind (Type)
 import qualified Data.Text as T
 import GHC.TypeLits (Symbol)
-import System.Metrics
-import qualified System.Metrics.Counter as Counter
-import System.Metrics.Export (sampleToPrometheus)
-import qualified System.Metrics.Gauge as Gauge
-import qualified System.Metrics.Histogram as Histogram
+import System.Metrics.Prometheus
+import qualified System.Metrics.Prometheus.Counter as Counter
+import System.Metrics.Prometheus.Export (sampleToPrometheus)
+import qualified System.Metrics.Prometheus.Gauge as Gauge
+import qualified System.Metrics.Prometheus.Histogram as Histogram
 import Test.Hspec
   ( Spec,
     describe,

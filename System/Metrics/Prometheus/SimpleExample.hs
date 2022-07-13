@@ -3,14 +3,14 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE TypeApplications #-}
 
-module System.Metrics.SimpleExample
+module System.Metrics.Prometheus.SimpleExample
   ( main
   ) where
 
 import Data.Kind (Type)
 import GHC.TypeLits (Symbol)
-import System.Metrics
-import qualified System.Metrics.Counter as Counter
+import System.Metrics.Prometheus
+import qualified System.Metrics.Prometheus.Counter as Counter
 
 -- A user-specified GADT statically determines the names, types, and
 -- possible tags of the metrics that can be registered to the store.

@@ -2,7 +2,7 @@
 -- Gauges are variable values and can be used to track e.g. the
 -- current number of concurrent connections. All operations on gauges
 -- are thread-safe.
-module System.Metrics.Gauge
+module System.Metrics.Prometheus.Gauge
     (
       Gauge
     , new

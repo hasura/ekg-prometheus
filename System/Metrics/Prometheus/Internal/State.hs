@@ -11,7 +11,7 @@
 --
 -- The contents of this module may change in any way whatsoever
 -- and without any warning between minor versions of this package.
-module System.Metrics.Internal.State
+module System.Metrics.Prometheus.Internal.State
     (
       -- * The metric store state
       State
@@ -55,7 +55,7 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import GHC.Generics
 import Prelude hiding (read)
-import System.Metrics.Histogram (HistogramSample)
+import System.Metrics.Prometheus.Histogram (HistogramSample)
 
 ------------------------------------------------------------------------
 -- * The metric store state
@@ -63,7 +63,7 @@ import System.Metrics.Histogram (HistogramSample)
 type GroupId = Integer
 type Version = Integer
 
--- | The internal state of the metrics `System.Metrics.Store`.
+-- | The internal state of the metrics `System.Metrics.Prometheus.Store`.
 data State = State
      { stateMetrics ::
         !(M.Map Identifier (Either MetricSampler GroupId, Version))
@@ -279,7 +279,7 @@ insertMetricSampler identifier sampler state0 =
 -- | Register a group of metrics sharing a common sampling action. If
 -- any of the given identifiers are in use by an existing metric, the
 -- existing metrics are first removed. Returns handles for deregistering
--- the registered metrics. See `System.Metrics.registerGroup`.
+-- the registered metrics. See `System.Metrics.Prometheus.registerGroup`.
 registerGroup
     :: M.Map Identifier
        (a -> Value)  -- ^ Metric identifiers and getter functions

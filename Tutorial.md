@@ -5,7 +5,7 @@ library, and illustrates how to use the library to instrument your
 programs with metrics. If you are new to the library, read this document
 first. If you have used the original `ekg-core` library, you should
 still read this document first. For a more complete API reference, see
-the Haddocks of the `System.Metrics` module.
+the Haddocks of the `System.Metrics.Prometheus` module.
 
 This document is a literate Haskell program:
 
@@ -29,9 +29,9 @@ import GHC.Stats (RTSStats (..), getRTSStats)
 import GHC.TypeLits (Symbol)
 
 -- This package's modules
-import System.Metrics
-import qualified System.Metrics.Counter as Counter
-import qualified System.Metrics.Gauge as Gauge
+import System.Metrics.Prometheus
+import qualified System.Metrics.Prometheus.Counter as Counter
+import qualified System.Metrics.Prometheus.Gauge as Gauge
 ```
 
 Although you will need to use some type-level features of Haskell when
@@ -473,7 +473,7 @@ This tutorial introduced and demonstrated the core features of the
 
 Additional features and details can be found in the following documents:
 
-- the Haddocks for the `System.Metrics` module
+- the Haddocks for the `System.Metrics.Prometheus` module
 - the Appendix section below.
 
 ## Appendix

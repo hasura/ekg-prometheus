@@ -1,4 +1,4 @@
-module System.Metrics.ThreadId
+module System.Metrics.Prometheus.ThreadId
     ( myCapability
     ) where
 

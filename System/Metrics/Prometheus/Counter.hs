@@ -2,7 +2,7 @@
 -- Counters are non-negative, monotonically increasing values and can
 -- be used to track e.g. the number of requests served since program
 -- start.  All operations on counters are thread-safe.
-module System.Metrics.Counter
+module System.Metrics.Prometheus.Counter
     (
       Counter
     , new

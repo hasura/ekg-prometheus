@@ -12,7 +12,7 @@ import qualified Data.Map.Strict as M
 import Test.Hspec
 import Test.HUnit (assertEqual)
 
-import System.Metrics.Internal.Store
+import System.Metrics.Prometheus.Internal.Store
 
 tests :: Spec
 tests =
