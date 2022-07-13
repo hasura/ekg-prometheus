@@ -98,7 +98,6 @@ module System.Metrics.Prometheus
 
 import Data.Coerce (coerce)
 import qualified Data.HashMap.Strict as HM
-import Data.Int (Int64)
 import Data.Kind (Type)
 import qualified Data.Map.Strict as M
 import Data.Proxy
@@ -192,8 +191,8 @@ data MetricType
 
 -- | The type of values sampled by each metric.
 type family MetricValue (t :: MetricType) :: Type where
-  MetricValue 'CounterType = Int64
-  MetricValue 'GaugeType = Int64
+  MetricValue 'CounterType = Double
+  MetricValue 'GaugeType = Double
   MetricValue 'HistogramType = HistogramSample
 
 -- | The `Metrics.Value` constructor for each metric.
@@ -442,7 +441,7 @@ registerCounter
   :: forall metrics name tags. (KnownSymbol name, ToTags tags)
   => metrics name 'CounterType tags -- ^ Metric class
   -> tags -- ^ Tags
-  -> IO Int64 -- ^ Action to read the current metric value
+  -> IO Double -- ^ Action to read the current metric value
   -> Registration metrics
 registerCounter = registerGeneric Internal.registerCounter
 
@@ -452,7 +451,7 @@ registerGauge
   :: forall metrics name tags. (KnownSymbol name, ToTags tags)
   => metrics name 'GaugeType tags -- ^ Metric class
   -> tags -- ^ Tags
-  -> IO Int64 -- ^ Action to read the current metric value
+  -> IO Double -- ^ Action to read the current metric value
   -> Registration metrics
 registerGauge = registerGeneric Internal.registerGauge
 
@@ -719,22 +718,22 @@ registerGcMetrics = registerGroup samplingGroup getRTSStats
     :> (CumulativeParBalancedCopiedBytes, (), fromIntegral . Stats.cumulative_par_balanced_copied_bytes)
 #endif
 #if MIN_VERSION_base(4,12,0)
-    :> (InitCpuNs, (), Stats.init_cpu_ns)
-    :> (InitElapsedNs, (), Stats.init_elapsed_ns)
+    :> (InitCpuNs, (), fromIntegral . Stats.init_cpu_ns)
+    :> (InitElapsedNs, (), fromIntegral . Stats.init_elapsed_ns)
 #endif
-    :> (MutatorCpuNs, (), Stats.mutator_cpu_ns)
-    :> (MutatorElapsedNs, (), Stats.mutator_elapsed_ns)
-    :> (GcCpuNs, (), Stats.gc_cpu_ns)
-    :> (GcElapsedNs, (), Stats.gc_elapsed_ns)
-    :> (CpuNs, (), Stats.cpu_ns)
-    :> (ElapsedNs, (), Stats.elapsed_ns)
+    :> (MutatorCpuNs, (), fromIntegral . Stats.mutator_cpu_ns)
+    :> (MutatorElapsedNs, (), fromIntegral . Stats.mutator_elapsed_ns)
+    :> (GcCpuNs, (), fromIntegral . Stats.gc_cpu_ns)
+    :> (GcElapsedNs, (), fromIntegral . Stats.gc_elapsed_ns)
+    :> (CpuNs, (), fromIntegral . Stats.cpu_ns)
+    :> (ElapsedNs, (), fromIntegral . Stats.elapsed_ns)
 #if MIN_VERSION_base(4,14,1)
-    :> (NonmovingGcSyncCpuNs, (), Stats.nonmoving_gc_sync_cpu_ns)
-    :> (NonmovingGcSyncElapsedNs, (), Stats.nonmoving_gc_sync_elapsed_ns)
-    :> (NonmovingGcSyncMaxElapsedNs, (), Stats.nonmoving_gc_sync_max_elapsed_ns)
-    :> (NonmovingGcCpuNs, (), Stats.nonmoving_gc_cpu_ns)
-    :> (NonmovingGcElapsedNs, (), Stats.nonmoving_gc_elapsed_ns)
-    :> (NonmovingGcMaxElapsedNs, (), Stats.nonmoving_gc_max_elapsed_ns)
+    :> (NonmovingGcSyncCpuNs, (), fromIntegral . Stats.nonmoving_gc_sync_cpu_ns)
+    :> (NonmovingGcSyncElapsedNs, (), fromIntegral . Stats.nonmoving_gc_sync_elapsed_ns)
+    :> (NonmovingGcSyncMaxElapsedNs, (), fromIntegral . Stats.nonmoving_gc_sync_max_elapsed_ns)
+    :> (NonmovingGcCpuNs, (), fromIntegral . Stats.nonmoving_gc_cpu_ns)
+    :> (NonmovingGcElapsedNs, (), fromIntegral . Stats.nonmoving_gc_elapsed_ns)
+    :> (NonmovingGcMaxElapsedNs, (), fromIntegral . Stats.nonmoving_gc_max_elapsed_ns)
 #endif
 
      -- GCDetails
@@ -755,8 +754,8 @@ registerGcMetrics = registerGroup samplingGroup getRTSStats
     :> (GcDetailsCpuNs, (), fromIntegral . Stats.gcdetails_cpu_ns . Stats.gc)
     :> (GcDetailsElapsedNs, (), fromIntegral . Stats.gcdetails_elapsed_ns . Stats.gc)
 #if MIN_VERSION_base(4,14,1)
-    :> (GcdetailsNonmovingGcSyncCpuNs, (), Stats.gcdetails_nonmoving_gc_sync_cpu_ns . Stats.gc)
-    :> (GcdetailsNonmovingGcSyncElapsedNs, (), Stats.gcdetails_nonmoving_gc_sync_elapsed_ns . Stats.gc)
+    :> (GcdetailsNonmovingGcSyncCpuNs, (), fromIntegral . Stats.gcdetails_nonmoving_gc_sync_cpu_ns . Stats.gc)
+    :> (GcdetailsNonmovingGcSyncElapsedNs, (), fromIntegral . Stats.gcdetails_nonmoving_gc_sync_elapsed_ns . Stats.gc)
 #endif
 
 -- | Get RTS statistics.

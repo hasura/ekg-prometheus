@@ -43,12 +43,11 @@ module System.Metrics.Prometheus.Export
   , escapeTagValue
   ) where
 
-import Data.Bifunctor (first, second)
+import Data.Bifunctor (first)
 import qualified Data.ByteString.Builder as B
 import Data.Char (isDigit)
 import Data.Function (on)
 import qualified Data.HashMap.Strict as HM
-import Data.Int (Int64)
 import Data.List (intersperse)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.List.NonEmpty as NonEmpty
@@ -147,10 +146,10 @@ type Tags = HM.HashMap T.Text T.Text
 data GroupedMetric
   = GroupedCounter
       T.Text -- Metric name
-      [(Tags, Int64)]
+      [(Tags, Double)]
   | GroupedGauge
       T.Text -- Metric name
-      [(Tags, Int64)]
+      [(Tags, Double)]
   | GroupedHistogram
       T.Text -- Metric name
       [(Tags, HistogramSample)]
@@ -179,14 +178,14 @@ makeGroupedMetric xs@((Identifier metricName _, headVal) :| _) =
   where
     xs_list = NonEmpty.toList xs
 
-getCounterValue :: Value -> Maybe Int64
+getCounterValue :: Value -> Maybe Double
 getCounterValue = \case
-  Counter i -> Just i
+  Counter x -> Just x
   _ -> Nothing
 
-getGaugeValue :: Value -> Maybe Int64
+getGaugeValue :: Value -> Maybe Double
 getGaugeValue = \case
-  Gauge i -> Just i
+  Gauge x -> Just x
   _ -> Nothing
 
 getHistogramValue :: Value -> Maybe HistogramSample
@@ -199,9 +198,9 @@ getHistogramValue = \case
 exportGroupedMetric :: GroupedMetric -> B.Builder
 exportGroupedMetric = \case
   GroupedCounter metricName tagsAndValues ->
-    exportCounter metricName $ map (second fromIntegral) tagsAndValues
+    exportCounter metricName tagsAndValues
   GroupedGauge metricName tagsAndValues ->
-    exportGauge metricName $ map (second fromIntegral) tagsAndValues
+    exportGauge metricName tagsAndValues
   GroupedHistogram metricName tagsAndValues ->
     exportHistogram metricName tagsAndValues
 

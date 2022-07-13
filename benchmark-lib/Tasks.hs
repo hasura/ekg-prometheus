@@ -17,7 +17,7 @@ incrementCounterWithMultipleWriters = do
     locks <- replicateM n newEmptyMVar
     mapM_ (forkIO . work counter iters) locks
     mapM_ takeMVar locks
-    total <- C.read counter
+    total <- C.readInt counter
     unless (fromIntegral total == n*iters) $
       error "Incorrect count!"
     pure total

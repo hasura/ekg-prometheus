@@ -47,7 +47,6 @@ module System.Metrics.Prometheus.Internal.State
     ) where
 
 import Data.Hashable
-import Data.Int (Int64)
 import qualified Data.HashMap.Strict as HM
 import Data.List (foldl', mapAccumL)
 import qualified Data.Map.Strict as M
@@ -100,9 +99,9 @@ data State = State
 -- | An action to read the current value of a metric. Needs to be
 -- thread-safe.
 data MetricSampler
-  = CounterS !(IO Int64)
+  = CounterS !(IO Double)
     -- ^ Action to sample a counter
-  | GaugeS !(IO Int64)
+  | GaugeS !(IO Double)
     -- ^ Action to sample a gauge
   | HistogramS !(IO HistogramSample)
     -- ^ Action to sample a histogram
@@ -404,8 +403,8 @@ sampleGroups cbSamplers = concat `fmap` mapM runOne cbSamplers
                       (M.toList groupSamplerMetrics)
 
 -- | The value of a sampled metric.
-data Value = Counter {-# UNPACK #-} !Int64
-           | Gauge {-# UNPACK #-} !Int64
+data Value = Counter {-# UNPACK #-} !Double
+           | Gauge {-# UNPACK #-} !Double
            | Histogram !HistogramSample
            deriving (Eq, Show)
 

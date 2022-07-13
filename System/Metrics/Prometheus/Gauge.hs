@@ -7,6 +7,7 @@ module System.Metrics.Prometheus.Gauge
       Gauge
     , new
     , read
+    , readInt
     , inc
     , dec
     , add
@@ -25,9 +26,15 @@ newtype Gauge = C { unC :: Atomic.Atomic }
 new :: IO Gauge
 new = C `fmap` Atomic.new 0
 
+-- | Get the current value of the gauge as a 'Double'.
+--
+-- > read = fmap fromIntegral . readInt
+read :: Gauge -> IO Double
+read = fmap fromIntegral . readInt
+
 -- | Get the current value of the gauge.
-read :: Gauge -> IO Int64
-read = Atomic.read . unC
+readInt :: Gauge -> IO Int64
+readInt = Atomic.read . unC
 
 -- | Increase the gauge by one.
 inc :: Gauge -> IO ()

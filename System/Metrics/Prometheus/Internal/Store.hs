@@ -63,7 +63,6 @@ module System.Metrics.Prometheus.Internal.Store
     , Value(..)
     ) where
 
-import Data.Int (Int64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
@@ -131,7 +130,7 @@ deregisterHandles handles stateRef =
 -- metric. The provided action to read the value must be thread-safe.
 -- Also see 'createCounter'.
 registerCounter :: Identifier -- ^ Counter identifier
-                -> IO Int64   -- ^ Action to read the current metric value
+                -> IO Double  -- ^ Action to read the current metric value
                 -> Registration -- ^ Registration action
 registerCounter identifier sample =
     registerGeneric identifier (CounterS sample)
@@ -139,7 +138,7 @@ registerCounter identifier sample =
 -- | Register an integer-valued metric. The provided action to read
 -- the value must be thread-safe. Also see 'createGauge'.
 registerGauge :: Identifier -- ^ Gauge identifier
-              -> IO Int64   -- ^ Action to read the current metric value
+              -> IO Double  -- ^ Action to read the current metric value
               -> Registration -- ^ Registration action
 registerGauge identifier sample =
     registerGeneric identifier (GaugeS sample)

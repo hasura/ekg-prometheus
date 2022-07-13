@@ -7,6 +7,7 @@ module System.Metrics.Prometheus.Counter
       Counter
     , new
     , read
+    , readInt
     , inc
     , add
     ) where
@@ -22,9 +23,15 @@ newtype Counter = C { unC :: Atomic.Atomic }
 new :: IO Counter
 new = C `fmap` Atomic.new 0
 
+-- | Get the current value of the counter as a 'Double'.
+--
+-- > read = fmap fromIntegral . readInt
+read :: Counter -> IO Double
+read = fmap fromIntegral . readInt
+
 -- | Get the current value of the counter.
-read :: Counter -> IO Int64
-read = Atomic.read . unC
+readInt :: Counter -> IO Int64
+readInt = Atomic.read . unC
 
 -- | Increase the counter by one.
 inc :: Counter -> IO ()
