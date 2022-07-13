@@ -50,7 +50,6 @@ module System.Metrics.Prometheus.Histogram
 
 import Prelude hiding (read)
 
-import Data.Bool (bool)
 import Data.Int (Int64)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Map.Strict (Map)
@@ -62,7 +61,7 @@ type UpperBound = Double -- Inclusive upper bounds
 
 data HistogramSample =
   HistogramSample
-    { histBuckets :: !(Map UpperBound Double)
+    { histBuckets :: !(Map UpperBound Double) -- Non-cumulative counts
     , histSum :: !Double
     , histCount :: !Int64
     }
@@ -90,15 +89,14 @@ observe (Histogram histRef) x =
   atomicModifyIORef' histRef $ \histData ->
     let newHistData =
           HistogramSample
-            { histBuckets = updateBuckets x $ histBuckets histData
+            { histBuckets = updateBuckets x (histBuckets histData)
             , histSum = histSum histData + x
             , histCount = histCount histData + 1
             }
      in (newHistData, ())
 
-updateBuckets
-  :: Double
-  -> Map UpperBound Double
-  -> Map UpperBound Double
-updateBuckets x = Map.mapWithKey updateBucket
-  where updateBucket key val = bool val (val + 1) (x <= key)
+updateBuckets :: Double -> Map UpperBound Double -> Map UpperBound Double
+updateBuckets x buckets =
+  case Map.lookupGE x buckets of
+    Nothing -> buckets
+    Just (bucket, count) -> Map.insert bucket (count+1) buckets

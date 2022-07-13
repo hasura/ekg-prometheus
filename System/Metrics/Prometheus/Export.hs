@@ -35,6 +35,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 -}
 
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -228,12 +229,16 @@ exportHistogram metricName tagsAndValues =
   mappend (metricTypeLine "histogram" metricName) $
     flip foldMap tagsAndValues $ \(tags, histSample) ->
       mconcat
-        [ flip foldMap (M.toList (histBuckets histSample)) $
-            \(upperBound, count) ->
-              metricSampleLine
-                metricName_bucket
-                (HM.insert "le" (T.pack (show upperBound)) tags)
-                (double count)
+        [ let cumulativeBuckets =
+                snd $ M.mapAccum cumulativeSum 0 (histBuckets histSample)
+                where
+                  cumulativeSum !sum_ x = let z = sum_ + x in (z, z)
+           in flip foldMap (M.toList cumulativeBuckets) $
+                \(upperBound, count) ->
+                  metricSampleLine
+                    metricName_bucket
+                    (HM.insert "le" (T.pack (show upperBound)) tags)
+                    (double count)
         , metricSampleLine
             metricName_bucket
             (HM.insert "le" "+Inf" tags)
