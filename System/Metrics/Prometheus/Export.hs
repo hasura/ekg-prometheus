@@ -49,6 +49,7 @@ import qualified Data.ByteString.Builder as B
 import Data.Char (isDigit)
 import Data.Function (on)
 import qualified Data.HashMap.Strict as HM
+import Data.Int (Int64)
 import Data.List (intersperse)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.List.NonEmpty as NonEmpty
@@ -118,12 +119,12 @@ import System.Metrics.Prometheus.Histogram
 -- > my_counter{tag_name_1="tag value 2",tag_name_2="tag value 2"} 11.0
 -- >
 -- > # TYPE my_histogram histogram
--- > my_histogram_bucket{tag="value",le="1.0"} 1.0
--- > my_histogram_bucket{tag="value",le="2.0"} 2.0
--- > my_histogram_bucket{tag="value",le="3.0"} 3.0
--- > my_histogram_bucket{tag="value",le="+Inf"} 4.0
+-- > my_histogram_bucket{tag="value",le="1.0"} 1
+-- > my_histogram_bucket{tag="value",le="2.0"} 2
+-- > my_histogram_bucket{tag="value",le="3.0"} 3
+-- > my_histogram_bucket{tag="value",le="+Inf"} 4
 -- > my_histogram_sum{tag="value"} 10.0
--- > my_histogram_count{tag="value"} 4.0
+-- > my_histogram_count{tag="value"} 4
 --
 sampleToPrometheus :: Sample -> B.Builder
 sampleToPrometheus =
@@ -238,11 +239,11 @@ exportHistogram metricName tagsAndValues =
                   metricSampleLine
                     metricName_bucket
                     (HM.insert "le" (T.pack (show upperBound)) tags)
-                    (double count)
+                    (int count)
         , metricSampleLine
             metricName_bucket
             (HM.insert "le" "+Inf" tags)
-            (double (fromIntegral (histCount histSample)))
+            (int (histCount histSample))
         , metricSampleLine
             (metricName <> "_sum")
             tags
@@ -250,7 +251,7 @@ exportHistogram metricName tagsAndValues =
         , metricSampleLine
             (metricName <> "_count")
             tags
-            (double (fromIntegral (histCount histSample)))
+            (int (histCount histSample))
         ]
   where
     metricName_bucket = metricName <> "_bucket"
@@ -371,6 +372,9 @@ text = B.byteString . T.encodeUtf8
 
 double :: Double -> B.Builder
 double = B.stringUtf8 . show
+
+int :: Int64 -> B.Builder
+int = B.stringUtf8 . show
 
 newline :: B.Builder
 newline = B.charUtf8 '\n'

@@ -61,7 +61,7 @@ type UpperBound = Double -- Inclusive upper bounds
 
 data HistogramSample =
   HistogramSample
-    { histBuckets :: !(Map UpperBound Double) -- Non-cumulative counts
+    { histBuckets :: !(Map UpperBound Int64) -- Non-cumulative counts
     , histSum :: !Double
     , histCount :: !Int64
     }
@@ -95,7 +95,7 @@ observe (Histogram histRef) x =
             }
      in (newHistData, ())
 
-updateBuckets :: Double -> Map UpperBound Double -> Map UpperBound Double
+updateBuckets :: Double -> Map UpperBound Int64 -> Map UpperBound Int64
 updateBuckets x buckets =
   case Map.lookupGE x buckets of
     Nothing -> buckets

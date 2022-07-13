@@ -64,7 +64,7 @@ tests =
   prometheusSample <- BB.toLazyByteString . sampleToPrometheus <$> sampleAll store
 
   shouldBe prometheusSample
-    "# TYPE _100gauge gauge\n_100gauge 100.0\n\n# TYPE my_counter counter\nmy_counter{tag_name_1=\"tag value 1\",tag_name_2=\"tag value 1\"} 10.0\nmy_counter{tag_name_1=\"tag value 2\",tag_name_2=\"tag value 2\"} 11.0\n\n# TYPE my_histogram histogram\nmy_histogram_bucket{tag=\"value\",le=\"1.0\"} 1.0\nmy_histogram_bucket{tag=\"value\",le=\"2.0\"} 2.0\nmy_histogram_bucket{tag=\"value\",le=\"3.0\"} 3.0\nmy_histogram_bucket{tag=\"value\",le=\"+Inf\"} 4.0\nmy_histogram_sum{tag=\"value\"} 10.0\nmy_histogram_count{tag=\"value\"} 4.0\n"
+    "# TYPE _100gauge gauge\n_100gauge 100.0\n\n# TYPE my_counter counter\nmy_counter{tag_name_1=\"tag value 1\",tag_name_2=\"tag value 1\"} 10.0\nmy_counter{tag_name_1=\"tag value 2\",tag_name_2=\"tag value 2\"} 11.0\n\n# TYPE my_histogram histogram\nmy_histogram_bucket{tag=\"value\",le=\"1.0\"} 1\nmy_histogram_bucket{tag=\"value\",le=\"2.0\"} 2\nmy_histogram_bucket{tag=\"value\",le=\"3.0\"} 3\nmy_histogram_bucket{tag=\"value\",le=\"+Inf\"} 4\nmy_histogram_sum{tag=\"value\"} 10.0\nmy_histogram_count{tag=\"value\"} 4\n"
 
 data ExampleMetrics :: Symbol -> MetricType -> Type -> Type where
   ExampleGauge
