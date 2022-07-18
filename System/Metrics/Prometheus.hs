@@ -87,6 +87,9 @@ module System.Metrics.Prometheus
     -- $sampling
   , sampleAll
   , Internal.Sample
+  , Internal.MetricName
+  , Internal.HelpText
+  , Internal.HelpTexts
   , Internal.Identifier (..)
   , Internal.Value (..)
 
@@ -172,7 +175,8 @@ import qualified System.Metrics.Prometheus.Internal.Store as Internal
 -- The metrics of each class @v :: metrics name metricType tags@ have
 -- their name, metric type, and possible tags statically determined by
 -- the respective type indices of @metrics@.
-newtype Store (metrics :: Symbol -> MetricType -> Type -> Type) =
+newtype
+  Store (metrics :: Symbol -> Symbol -> MetricType -> Type -> Type) =
   Store Internal.Store
 
 -- | Create a new, empty metric store.
@@ -325,7 +329,8 @@ instance GToTags (K1 i T.Text) where
 -- > subset' = subset GcSubset
 subset
   :: (forall name metricType tags.
-      metricsSubset name metricType tags -> metrics name metricType tags)
+      metricsSubset name help metricType tags ->
+      metrics name help metricType tags)
     -- ^ Subset
   -> Store metrics -- ^ Reference
   -> Store metricsSubset -- ^ Restricted reference
@@ -366,11 +371,12 @@ subset _ = coerce
 --
 -- The only operation available to a store with scope @`EmptyMetrics`@
 -- is `sampleAll`.
-data EmptyMetrics :: Symbol -> MetricType -> Type -> Type where
+data EmptyMetrics :: Symbol -> Symbol -> MetricType -> Type -> Type where
 
 -- | The smallest scope can be embedded in any scope.
 emptyOf
-  :: EmptyMetrics name metricType tags -> metrics name metricType tags
+  :: EmptyMetrics name help metricType tags
+  -> metrics name help metricType tags
 emptyOf metrics = case metrics of {}
 
 -- | The largest scope, containing all metrics. All scopes can be
@@ -382,15 +388,16 @@ emptyOf metrics = case metrics of {}
 -- > example :: Store AllMetrics -> IO Counter.Counter
 -- > example = createCounter (Metrics @"total_requests") ()
 --
-data AllMetrics :: Symbol -> MetricType -> Type -> Type where
-  Metric :: AllMetrics name metricType tags
+data AllMetrics :: Symbol -> Symbol -> MetricType -> Type -> Type where
+  Metric :: AllMetrics name help metricType tags
 
 _exampleAllMetrics :: Store AllMetrics -> IO Counter.Counter
-_exampleAllMetrics = createCounter (Metric @"total_requests") ()
+_exampleAllMetrics = createCounter (Metric @"total_requests" @"") ()
 
 -- | All scopes can be embedded in the largest scope.
 ofAll
-  :: metrics name metricType tags -> AllMetrics name metricType tags
+  :: metrics name metricType tags
+  -> AllMetrics name help metricType tags
 ofAll _ = Metric
 
 ------------------------------------------------------------------------
@@ -426,7 +433,8 @@ register (Store store) (Registration registration) =
 
 -- | An action that registers one or more metrics to a metric store.
 -- Can only be run by `register`.
-newtype Registration (metric :: Symbol -> MetricType -> Type -> Type)
+newtype
+  Registration (metric :: Symbol -> Symbol -> MetricType -> Type -> Type)
   = Registration Internal.Registration
 
 -- | Combine registration actions by running one after the other.
@@ -438,8 +446,9 @@ deriving instance Monoid (Registration metrics)
 -- metric. The provided action to read the value must be thread-safe.
 -- Also see 'createCounter'.
 registerCounter
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'CounterType tags -- ^ Metric class
+  :: forall metrics name help tags.
+      (KnownSymbol name, KnownSymbol help, ToTags tags)
+  => metrics name help 'CounterType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO Double -- ^ Action to read the current metric value
   -> Registration metrics
@@ -448,8 +457,9 @@ registerCounter = registerGeneric Internal.registerCounter
 -- | Register an integer-valued metric. The provided action to read
 -- the value must be thread-safe. Also see 'createGauge'.
 registerGauge
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'GaugeType tags -- ^ Metric class
+  :: forall metrics name help tags.
+      (KnownSymbol name, KnownSymbol help, ToTags tags)
+  => metrics name help 'GaugeType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO Double -- ^ Action to read the current metric value
   -> Registration metrics
@@ -458,26 +468,30 @@ registerGauge = registerGeneric Internal.registerGauge
 -- | Register an integer-valued metric. The provided action to read
 -- the value must be thread-safe. Also see 'createGauge'.
 registerHistogram
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'HistogramType tags -- ^ Metric class
+  :: forall metrics name help tags.
+      (KnownSymbol name, KnownSymbol help, ToTags tags)
+  => metrics name help 'HistogramType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO HistogramSample -- ^ Action to read the current metric value
   -> Registration metrics
 registerHistogram = registerGeneric Internal.registerHistogram
 
 registerGeneric
-  :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
+  :: forall metrics name help metricType tags.
+      (KnownSymbol name, KnownSymbol help, ToTags tags)
   => ( Internal.Identifier
+      -> Internal.HelpText
       -> IO (MetricValue metricType)
       -> Internal.Registration)
-  -> metrics name metricType tags -- ^ Metric class
+  -> metrics name help metricType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> IO (MetricValue metricType) -- ^ Action to read the current metric value
   -> Registration metrics -- ^ Registration action
 registerGeneric f _ tags sample =
   let name = T.pack $ symbolVal (Proxy @name)
       identifier = Internal.Identifier name (toTags tags)
-  in  Registration $ f identifier sample
+      helpText = T.pack $ symbolVal (Proxy @help)
+  in  Registration $ f identifier helpText sample
 
 -- | Register an action that will be executed any time one of the
 -- metrics computed from the value it returns needs to be sampled.
@@ -521,7 +535,7 @@ registerGroup = registerGroup_ []
 infixl 9 :>
 -- | A group of metrics derived from the same sample.
 data SamplingGroup
-  :: (Symbol -> MetricType -> Type -> Type)
+  :: (Symbol -> Symbol -> MetricType -> Type -> Type)
   -> Type
   -> [Type]
   -> Type
@@ -531,17 +545,18 @@ data SamplingGroup
   -- | Add a metric to a sampling group
   (:>)
     :: SamplingGroup metrics env xs -- ^ Group to add to
-    ->  ( metrics name metricType tags
+    ->  ( metrics name help metricType tags
         , tags
         , env -> MetricValue metricType )
         -- ^ Metric class, Tags, Getter function
-    -> SamplingGroup metrics env (metrics name metricType tags ': xs)
+    -> SamplingGroup metrics env (metrics name help metricType tags ': xs)
 
 
 -- | Helper class for `registerGroup`.
 class RegisterGroup (xs :: [Type]) where
   registerGroup_
-    :: [(Internal.Identifier, env -> Internal.Value)] -- ^ Processed metrics
+    :: [(Internal.Identifier, (env -> Internal.Value, Internal.HelpText))]
+        -- ^ Processed metrics
     -> SamplingGroup metrics env xs -- ^ Metrics to be processed
     -> IO env -- ^ Action to sample the metric group
     -> Registration metrics
@@ -556,8 +571,9 @@ instance
   ( RegisterGroup xs
   , ToMetricValue metricType
   , KnownSymbol name
+  , KnownSymbol help
   , ToTags tags
-  ) => RegisterGroup (metrics name metricType tags ': xs)
+  ) => RegisterGroup (metrics name help metricType tags ': xs)
   where
   registerGroup_ getters (group :> (_, tags, getter)) sample =
     let identifier = Internal.Identifier
@@ -565,7 +581,10 @@ instance
           , Internal.idTags = toTags tags }
         getter' =
           ( identifier
-          , toMetricValue (Proxy @metricType) . getter )
+          , ( toMetricValue (Proxy @metricType) . getter
+            , T.pack $ symbolVal (Proxy @help)
+            )
+          )
     in  registerGroup_ (getter' : getters) group sample
 
 ------------------------------------------------------------------------
@@ -579,8 +598,9 @@ instance
 
 -- | Create and register a zero-initialized counter.
 createCounter
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'CounterType tags -- ^ Metric class
+  :: forall metrics name help tags.
+      (KnownSymbol name, KnownSymbol help, ToTags tags)
+  => metrics name help 'CounterType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO Counter.Counter
@@ -588,8 +608,9 @@ createCounter = createGeneric Internal.createCounter
 
 -- | Create and register a zero-initialized gauge.
 createGauge
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'GaugeType tags -- ^ Metric class
+  :: forall metrics name help tags.
+      (KnownSymbol name, KnownSymbol help, ToTags tags)
+  => metrics name help 'GaugeType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO Gauge.Gauge
@@ -598,9 +619,10 @@ createGauge = createGeneric Internal.createGauge
 -- | Create and register an empty histogram. The buckets of the
 -- histogram are fixed and defined by the given upper bounds.
 createHistogram
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
+  :: forall metrics name help tags.
+      (KnownSymbol name, KnownSymbol help, ToTags tags)
   => [Histogram.UpperBound] -- ^ Upper bounds of buckets
-  -> metrics name 'HistogramType tags -- ^ Metric class
+  -> metrics name help 'HistogramType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO Histogram.Histogram
@@ -608,16 +630,22 @@ createHistogram upperBounds =
   createGeneric (Internal.createHistogram upperBounds)
 
 createGeneric
-  :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
-  => (Internal.Identifier -> Internal.Store -> IO (MetricsImpl metricType))
-  -> metrics name metricType tags -- ^ Metric class
+  :: forall metrics name help metricType tags.
+      (KnownSymbol name, KnownSymbol help, ToTags tags)
+  => (Internal.Identifier
+      -> Internal.HelpText
+      -> Internal.Store
+      -> IO (MetricsImpl metricType)
+      )
+  -> metrics name help metricType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> Store metrics -- ^ Metric store
   -> IO (MetricsImpl metricType)
 createGeneric f _ tags (Store store) =
   let name = T.pack $ symbolVal (Proxy @name)
       identifier = Internal.Identifier name (toTags tags)
-  in  f identifier store
+      helpText = T.pack $ symbolVal (Proxy @help)
+  in  f identifier helpText store
 
 ------------------------------------------------------------------------
 -- ** Deregistering
@@ -636,7 +664,8 @@ _deregister (Store store) (Deregistration deregistration) =
 
 -- | An action that deregisters one or more metrics from a metric store.
 -- Can only be run by `deregister`.
-newtype Deregistration (metrics :: Symbol -> MetricType -> Type -> Type)
+newtype
+  Deregistration (metrics :: Symbol -> Symbol -> MetricType -> Type -> Type)
   = Deregistration Internal.Deregistration
 
 -- | Combine deregistration actions by running one after the other.
@@ -646,9 +675,9 @@ deriving instance Monoid (Deregistration metrics)
 
 -- | Deregister a metric with a specific class and tag set.
 _deregisterMetric
-  :: forall metrics name metricType tags.
+  :: forall metrics name help metricType tags.
       (KnownSymbol name, ToTags tags)
-  => metrics name metricType tags -- ^ Metric class
+  => metrics name help metricType tags -- ^ Metric class
   -> tags -- ^ Tags
   -> Deregistration metrics
 _deregisterMetric _ tags =
@@ -658,8 +687,8 @@ _deregisterMetric _ tags =
 
 -- | Deregister all the metrics registered to a class.
 _deregisterClass
-  :: forall metrics name metricType tags. (KnownSymbol name)
-  => metrics name metricType tags -- ^ Metric class
+  :: forall metrics name help metricType tags. (KnownSymbol name)
+  => metrics name help metricType tags -- ^ Metric class
   -> Deregistration metrics
 _deregisterClass _ =
   let name = T.pack $ symbolVal (Proxy @name)
@@ -678,7 +707,7 @@ _deregisterClass _ =
 -- | Sample all metrics. Sampling is /not/ atomic in the sense that
 -- some metrics might have been mutated before they're sampled but
 -- after some other metrics have already been sampled.
-sampleAll :: Store metrics -> IO Internal.Sample
+sampleAll :: Store metrics -> IO (Internal.Sample, Internal.HelpTexts)
 sampleAll (Store store) = Internal.sampleAll store
 
 ------------------------------------------------------------------------
@@ -832,102 +861,104 @@ emptyGCDetails = Stats.GCDetails
 -- | The metrics registered by `registerGcMetrics`. These metrics are the
 -- metrics exposed by the "GHC.Stats" module, listed in the same order for easy
 -- comparison.
-data GcMetrics :: Symbol -> MetricType -> Type -> Type where
+--
+-- TODO: Put descriptions into help text
+data GcMetrics :: Symbol -> Symbol -> MetricType -> Type -> Type where
   -- | Total number of GCs
-  Gcs :: GcMetrics "rts.gcs" 'CounterType ()
+  Gcs :: GcMetrics "rts.gcs" "" 'CounterType ()
   -- | Total number of major (oldest generation) GCs
-  MajorGcs :: GcMetrics "rts.major_gcs" 'CounterType ()
+  MajorGcs :: GcMetrics "rts.major_gcs" "" 'CounterType ()
   -- | Total bytes allocated
-  AllocatedBytes :: GcMetrics "rts.allocated_bytes" 'CounterType ()
+  AllocatedBytes :: GcMetrics "rts.allocated_bytes" "" 'CounterType ()
   -- | Maximum live data (including large objects + compact regions) in the heap. Updated after a major GC.
-  MaxLiveBytes :: GcMetrics "rts.max_live_bytes" 'GaugeType ()
+  MaxLiveBytes :: GcMetrics "rts.max_live_bytes" "" 'GaugeType ()
   -- | Maximum live data in large objects
-  MaxLargeObjectsBytes :: GcMetrics "rts.max_large_objects_bytes" 'GaugeType ()
+  MaxLargeObjectsBytes :: GcMetrics "rts.max_large_objects_bytes" "" 'GaugeType ()
   -- | Maximum live data in compact regions
-  MaxCompactBytes :: GcMetrics "rts.max_compact_bytes" 'GaugeType ()
+  MaxCompactBytes :: GcMetrics "rts.max_compact_bytes" "" 'GaugeType ()
   -- | Maximum slop
-  MaxSlopBytes :: GcMetrics "rts.max_slop_bytes" 'GaugeType ()
+  MaxSlopBytes :: GcMetrics "rts.max_slop_bytes" "" 'GaugeType ()
   -- | Maximum memory in use by the RTS
-  MaxMemInUseBytes :: GcMetrics "rts.max_mem_in_use_bytes" 'GaugeType ()
+  MaxMemInUseBytes :: GcMetrics "rts.max_mem_in_use_bytes" "" 'GaugeType ()
   -- | Sum of live bytes across all major GCs. Divided by major_gcs gives the average live data over the lifetime of the program.
-  CumulativeLiveBytes :: GcMetrics "rts.cumulative_live_bytes" 'CounterType ()
+  CumulativeLiveBytes :: GcMetrics "rts.cumulative_live_bytes" "" 'CounterType ()
   -- | Sum of copied_bytes across all GCs
-  CopiedBytes :: GcMetrics "rts.copied_bytes" 'CounterType ()
+  CopiedBytes :: GcMetrics "rts.copied_bytes" "" 'CounterType ()
   -- | Sum of copied_bytes across all parallel GCs
-  ParCopiedBytes :: GcMetrics "rts.par_copied_bytes" 'GaugeType ()
+  ParCopiedBytes :: GcMetrics "rts.par_copied_bytes" "" 'GaugeType ()
   -- | Sum of par_max_copied_bytes across all parallel GCs. Deprecated.
-  CumulativeParMaxCopiedBytes :: GcMetrics "rts.cumulative_par_max_copied_bytes" 'GaugeType ()
+  CumulativeParMaxCopiedBytes :: GcMetrics "rts.cumulative_par_max_copied_bytes" "" 'GaugeType ()
 #if MIN_VERSION_base(4,11,0)
   -- | Sum of par_balanced_copied bytes across all parallel GCs
-  CumulativeParBalancedCopiedBytes :: GcMetrics "rts.cumulative_par_balanced_copied_bytes" 'GaugeType ()
+  CumulativeParBalancedCopiedBytes :: GcMetrics "rts.cumulative_par_balanced_copied_bytes" "" 'GaugeType ()
 #endif
 #if MIN_VERSION_base(4,12,0)
   -- | Total CPU time used by the init phase @since 4.12.0.0
-  InitCpuNs :: GcMetrics "rts.init_cpu_ns" 'CounterType ()
+  InitCpuNs :: GcMetrics "rts.init_cpu_ns" "" 'CounterType ()
   -- | Total elapsed time used by the init phase @since 4.12.0.0
-  InitElapsedNs :: GcMetrics "rts.init_elapsed_ns" 'CounterType ()
+  InitElapsedNs :: GcMetrics "rts.init_elapsed_ns" "" 'CounterType ()
 #endif
   -- | Total CPU time used by the mutator
-  MutatorCpuNs :: GcMetrics "rts.mutator_cpu_ns" 'CounterType ()
+  MutatorCpuNs :: GcMetrics "rts.mutator_cpu_ns" "" 'CounterType ()
   -- | Total elapsed time used by the mutator
-  MutatorElapsedNs :: GcMetrics "rts.mutator_elapsed_ns" 'CounterType ()
+  MutatorElapsedNs :: GcMetrics "rts.mutator_elapsed_ns" "" 'CounterType ()
   -- | Total CPU time used by the GC
-  GcCpuNs :: GcMetrics "rts.gc_cpu_ns" 'CounterType ()
+  GcCpuNs :: GcMetrics "rts.gc_cpu_ns" "" 'CounterType ()
   -- | Total elapsed time used by the GC
-  GcElapsedNs :: GcMetrics "rts.gc_elapsed_ns" 'CounterType ()
+  GcElapsedNs :: GcMetrics "rts.gc_elapsed_ns" "" 'CounterType ()
   -- | Total CPU time (at the previous GC)
-  CpuNs :: GcMetrics "rts.cpu_ns" 'CounterType ()
+  CpuNs :: GcMetrics "rts.cpu_ns" "" 'CounterType ()
   -- | Total elapsed time (at the previous GC)
-  ElapsedNs :: GcMetrics "rts.elapsed_ns" 'CounterType ()
+  ElapsedNs :: GcMetrics "rts.elapsed_ns" "" 'CounterType ()
 #if MIN_VERSION_base(4,14,1)
   -- | The CPU time used during the post-mark pause phase of the concurrent nonmoving GC.
-  NonmovingGcSyncCpuNs :: GcMetrics "nonmoving_gc_sync_cpu_ns" 'CounterType ()
+  NonmovingGcSyncCpuNs :: GcMetrics "nonmoving_gc_sync_cpu_ns" "" 'CounterType ()
   -- | The time elapsed during the post-mark pause phase of the concurrent nonmoving GC.
-  NonmovingGcSyncElapsedNs :: GcMetrics "nonmoving_gc_sync_elapsed_ns" 'CounterType ()
+  NonmovingGcSyncElapsedNs :: GcMetrics "nonmoving_gc_sync_elapsed_ns" "" 'CounterType ()
   -- | The maximum time elapsed during the post-mark pause phase of the concurrent nonmoving GC.
-  NonmovingGcSyncMaxElapsedNs :: GcMetrics "nonmoving_gc_sync_max_elapsed_ns" 'GaugeType ()
+  NonmovingGcSyncMaxElapsedNs :: GcMetrics "nonmoving_gc_sync_max_elapsed_ns" "" 'GaugeType ()
   -- | The CPU time used during the post-mark pause phase of the concurrent nonmoving GC.
-  NonmovingGcCpuNs :: GcMetrics "nonmoving_gc_cpu_ns" 'CounterType ()
+  NonmovingGcCpuNs :: GcMetrics "nonmoving_gc_cpu_ns" "" 'CounterType ()
   -- | The time elapsed during the post-mark pause phase of the concurrent nonmoving GC.
-  NonmovingGcElapsedNs :: GcMetrics "nonmoving_gc_elapsed_ns" 'CounterType ()
+  NonmovingGcElapsedNs :: GcMetrics "nonmoving_gc_elapsed_ns" "" 'CounterType ()
   -- | The maximum time elapsed during the post-mark pause phase of the concurrent nonmoving GC.
-  NonmovingGcMaxElapsedNs :: GcMetrics "nonmoving_gc_max_elapsed_ns" 'GaugeType ()
+  NonmovingGcMaxElapsedNs :: GcMetrics "nonmoving_gc_max_elapsed_ns" "" 'GaugeType ()
 #endif
 
   -- GCDetails
   -- | The generation number of this GC
-  GcDetailsGen :: GcMetrics "rts.gc.gen" 'GaugeType ()
+  GcDetailsGen :: GcMetrics "rts.gc.gen" "" 'GaugeType ()
   -- | Number of threads used in this GC
-  GcDetailsThreads :: GcMetrics "rts.gc.threads" 'GaugeType ()
+  GcDetailsThreads :: GcMetrics "rts.gc.threads" "" 'GaugeType ()
   -- | Number of bytes allocated since the previous GC
-  GcDetailsAllocatedBytes :: GcMetrics "rts.gc.allocated_bytes" 'GaugeType ()
+  GcDetailsAllocatedBytes :: GcMetrics "rts.gc.allocated_bytes" "" 'GaugeType ()
   -- | Total amount of live data in the heap (incliudes large + compact data). Updated after every GC. Data in uncollected generations (in minor GCs) are considered live.
-  GcDetailsLiveBytes :: GcMetrics "rts.gc.live_bytes" 'GaugeType ()
+  GcDetailsLiveBytes :: GcMetrics "rts.gc.live_bytes" "" 'GaugeType ()
   -- | Total amount of live data in large objects
-  GcDetailsLargeObjectsBytes :: GcMetrics "rts.gc.large_objects_bytes" 'GaugeType ()
+  GcDetailsLargeObjectsBytes :: GcMetrics "rts.gc.large_objects_bytes" "" 'GaugeType ()
   -- | Total amount of live data in compact regions
-  GcDetailsCompactBytes :: GcMetrics "rts.gc.compact_bytes" 'GaugeType ()
+  GcDetailsCompactBytes :: GcMetrics "rts.gc.compact_bytes" "" 'GaugeType ()
   -- | Total amount of slop (wasted memory)
-  GcDetailsSlopBytes :: GcMetrics "rts.gc.slop_bytes" 'GaugeType ()
+  GcDetailsSlopBytes :: GcMetrics "rts.gc.slop_bytes" "" 'GaugeType ()
   -- | Total amount of memory in use by the RTS
-  GcDetailsMemInUseBytes :: GcMetrics "rts.gc.mem_in_use_bytes" 'GaugeType ()
+  GcDetailsMemInUseBytes :: GcMetrics "rts.gc.mem_in_use_bytes" "" 'GaugeType ()
   -- | Total amount of data copied during this GC
-  GcDetailsCopiedBytes :: GcMetrics "rts.gc.copied_bytes" 'GaugeType ()
+  GcDetailsCopiedBytes :: GcMetrics "rts.gc.copied_bytes" "" 'GaugeType ()
   -- | In parallel GC, the max amount of data copied by any one thread. Deprecated.
-  GcDetailsParMaxCopiedBytes :: GcMetrics "rts.gc.par_max_copied_bytes" 'GaugeType ()
+  GcDetailsParMaxCopiedBytes :: GcMetrics "rts.gc.par_max_copied_bytes" "" 'GaugeType ()
 #if MIN_VERSION_base(4,11,0)
   -- | In parallel GC, the amount of balanced data copied by all threads
-  GcDetailsParBalancedCopiedBytes :: GcMetrics "rts.gc.par_balanced_copied_bytes" 'GaugeType ()
+  GcDetailsParBalancedCopiedBytes :: GcMetrics "rts.gc.par_balanced_copied_bytes" "" 'GaugeType ()
 #endif
   -- | The time elapsed during synchronisation before GC
-  GcDetailsSyncElapsedNs :: GcMetrics "rts.gc.sync_elapsed_ns" 'GaugeType ()
+  GcDetailsSyncElapsedNs :: GcMetrics "rts.gc.sync_elapsed_ns" "" 'GaugeType ()
   -- | The CPU time used during GC itself
-  GcDetailsCpuNs :: GcMetrics "rts.gc.cpu_ns" 'GaugeType ()
+  GcDetailsCpuNs :: GcMetrics "rts.gc.cpu_ns" "" 'GaugeType ()
   -- | The time elapsed during GC itself
-  GcDetailsElapsedNs :: GcMetrics "rts.gc.elapsed_ns" 'GaugeType ()
+  GcDetailsElapsedNs :: GcMetrics "rts.gc.elapsed_ns" "" 'GaugeType ()
 #if MIN_VERSION_base(4,14,1)
   -- | The CPU time used during the post-mark pause phase of the concurrent nonmoving GC.
-  GcdetailsNonmovingGcSyncCpuNs :: GcMetrics "gcdetails_nonmoving_gc_sync_cpu_ns" 'GaugeType ()
+  GcdetailsNonmovingGcSyncCpuNs :: GcMetrics "gcdetails_nonmoving_gc_sync_cpu_ns" "" 'GaugeType ()
   -- | The time elapsed during the post-mark pause phase of the concurrent nonmoving GC.
-  GcdetailsNonmovingGcSyncElapsedNs :: GcMetrics "gcdetails_nonmoving_gc_sync_elapsed_ns" 'GaugeType ()
+  GcdetailsNonmovingGcSyncElapsedNs :: GcMetrics "gcdetails_nonmoving_gc_sync_elapsed_ns" "" 'GaugeType ()
 #endif

@@ -3,6 +3,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE StandaloneKindSignatures #-}
 
 module System.Metrics.Prometheus.Example
   ( main
@@ -17,11 +18,12 @@ import qualified System.Metrics.Prometheus.Gauge as Gauge
 import System.Metrics.Prometheus
 
 -- Custom type describing a set of classes of metrics.
-data MyMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
+type MyMetrics :: Symbol -> Symbol -> MetricType -> Type -> Type
+data MyMetrics name help metricType tags where
   Requests ::
-    MyMetrics "requests" 'CounterType EndpointTags
+    MyMetrics "requests" "" 'CounterType EndpointTags
   DBConnections ::
-    MyMetrics "postgres.total_connections" 'GaugeType DataSourceTags
+    MyMetrics "postgres.total_connections" "" 'GaugeType DataSourceTags
 
 -- Custom tag set
 newtype EndpointTags = EndpointTags { endpoint :: T.Text }

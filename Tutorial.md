@@ -81,12 +81,13 @@ that specifies two metrics:
 ```haskell
 data AppMetrics1
   :: Symbol -- ^ Metric name
+  -> Symbol -- ^ Metric documentation
   -> MetricType -- ^ e.g. Counter, Gauge
   -> Type -- ^ Tag set structure
   -> Type
   where
-  Requests :: AppMetrics1 "my_app.requests" 'CounterType ()
-  Connections :: AppMetrics1 "my_app.connections" 'GaugeType ()
+  Requests :: AppMetrics1 "my_app.requests" "" 'CounterType ()
+  Connections :: AppMetrics1 "my_app.connections" "" 'GaugeType ()
 ```
 
 The `AppMetrics1` GADT has two constructors, `Requests` and
@@ -129,7 +130,7 @@ app1 = do
   Gauge.set connectionsGauge 99
 
   -- Get the current values of all the metrics in the store.
-  sample <- sampleAll store -- (3)
+  (sample, _helpTexts) <- sampleAll store -- (3)
 
   -- Verify the sample, just for this tutorial.
   let expectedSample = M.fromList
@@ -193,13 +194,14 @@ Here is an example metrics specification that defines some tagged metrics:
 ```haskell
 data AppMetrics2
   :: Symbol
+  -> Symbol
   -> MetricType
   -> Type -- ^ Tag set structure
   -> Type
   where
   -- (1)
-  HTTPRequests :: AppMetrics2 "requests" 'CounterType EndpointTags
-  DBConnections :: AppMetrics2 "total_connections" 'GaugeType DataSourceTags
+  HTTPRequests :: AppMetrics2 "requests" "" 'CounterType EndpointTags
+  DBConnections :: AppMetrics2 "total_connections" "" 'GaugeType DataSourceTags
 
 -- (2)
 newtype EndpointTags = EndpointTags { endpoint :: T.Text }
@@ -255,7 +257,7 @@ app2 = do
   Counter.inc tablaRequests
   Gauge.set dbConnections 99
 
-  sample <- sampleAll store
+  (sample, _helpTexts) <- sampleAll store
 
   let expectedSample = M.fromList
         [ ( Identifier
@@ -317,7 +319,7 @@ app3 = do
   Counter.inc requestsCounter
   Gauge.set connectionsGauge 99
 
-  sample1 <- sampleAll store
+  (sample1, _helpTexts) <- sampleAll store
   let expectedSample1 = M.fromList
         [ (Identifier "my_app.requests" HM.empty, Counter 1)
         , (Identifier "my_app.connections" HM.empty, Gauge 99)
@@ -330,7 +332,7 @@ app3 = do
   _ <- register store $
     registerGauge Connections () (Gauge.read replacementConnectionsGauge)
 
-  sample2 <- sampleAll store
+  (sample2, _helpTexts) <- sampleAll store
   let expectedSample2 = M.fromList
         [ (Identifier "my_app.requests" HM.empty, Counter 1)
         , (Identifier "my_app.connections" HM.empty, Gauge 5)
@@ -340,7 +342,7 @@ app3 = do
   -- Use the deregistration handle to deregister the original metrics.
   deregistrationHandle -- (2)
 
-  sample3 <- sampleAll store
+  (sample3, _helpTexts) <- sampleAll store
   let expectedSample3 = M.fromList
         [ (Identifier "my_app.connections" HM.empty, Gauge 5)
         ]
@@ -368,10 +370,11 @@ specification (used by `registerGcMetrics`) as a part of another metrics
 specification:
 
 ```haskell
-data AppMetrics4 :: Symbol -> MetricType -> Type -> Type where
+data AppMetrics4 :: Symbol -> Symbol -> MetricType -> Type -> Type where
   -- (1)
   GcSubset ::
-    GcMetrics name metricType tags -> AppMetrics4 name metricType tags
+    GcMetrics name help metricType tags ->
+    AppMetrics4 name help metricType tags
 
 app4 :: IO ()
 app4 = do
@@ -426,9 +429,9 @@ example program that does this:
 
 ```haskell
 -- (1)
-data GcMetrics' :: Symbol -> MetricType -> Type -> Type where
-  Gcs' :: GcMetrics' "rts.gcs" 'CounterType ()
-  MaxLiveBytes' :: GcMetrics' "rts.max_live_bytes" 'GaugeType ()
+data GcMetrics' :: Symbol -> Symbol -> MetricType -> Type -> Type where
+  Gcs' :: GcMetrics' "rts.gcs" "" 'CounterType ()
+  MaxLiveBytes' :: GcMetrics' "rts.max_live_bytes" "" 'GaugeType ()
 
 app5 :: IO ()
 app5 = do
@@ -489,17 +492,17 @@ removed or modified. Here is an example program that does this.
 
 ```haskell
 -- (1)
-data AppMetrics6 :: Symbol -> MetricType -> Type -> Type where
+data AppMetrics6 :: Symbol -> Symbol -> MetricType -> Type -> Type where
   DynamicSubset ::
-    DynamicMetrics name metricType tags -> AppMetrics6 name metricType tags
+    DynamicMetrics name help metricType tags -> AppMetrics6 name help metricType tags
   StaticSubset ::
-    StaticMetrics name metricType tags -> AppMetrics6 name metricType tags
+    StaticMetrics name help metricType tags -> AppMetrics6 name help metricType tags
 
-data StaticMetrics :: Symbol -> MetricType -> Type -> Type where
-  MyStaticMetric :: StaticMetrics "my_static_metric" 'CounterType ()
+data StaticMetrics :: Symbol -> Symbol -> MetricType -> Type -> Type where
+  MyStaticMetric :: StaticMetrics "my_static_metric" "" 'CounterType ()
 
-data DynamicMetrics :: Symbol -> MetricType -> Type -> Type where
-  MyDynamicMetric :: DynamicMetrics "my_dynamic_metric" 'CounterType ()
+data DynamicMetrics :: Symbol -> Symbol -> MetricType -> Type -> Type where
+  MyDynamicMetric :: DynamicMetrics "my_dynamic_metric" "" 'CounterType ()
 
 app6 :: IO ()
 app6 = do

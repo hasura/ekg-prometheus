@@ -61,15 +61,28 @@ tests =
       store
   for_ (4:upperBounds) (Histogram.observe histogram)
 
-  prometheusSample <- BB.toLazyByteString . sampleToPrometheus <$> sampleAll store
+  prometheusSample <-
+    BB.toLazyByteString . sampleToPrometheus <$> sampleAll store
 
   shouldBe prometheusSample
-    "# TYPE _100gauge gauge\n_100gauge 100.0\n\n# TYPE my_counter counter\nmy_counter{tag_name_1=\"tag value 1\",tag_name_2=\"tag value 1\"} 10.0\nmy_counter{tag_name_1=\"tag value 2\",tag_name_2=\"tag value 2\"} 11.0\n\n# TYPE my_histogram histogram\nmy_histogram_bucket{tag=\"value\",le=\"1.0\"} 1\nmy_histogram_bucket{tag=\"value\",le=\"2.0\"} 2\nmy_histogram_bucket{tag=\"value\",le=\"3.0\"} 3\nmy_histogram_bucket{tag=\"value\",le=\"+Inf\"} 4\nmy_histogram_sum{tag=\"value\"} 10.0\nmy_histogram_count{tag=\"value\"} 4\n"
+    "# HELP _100gauge Example gauge\n# TYPE _100gauge gauge\n_100gauge 100.0\n\n# HELP my_counter Example counter\n# TYPE my_counter counter\nmy_counter{tag_name_1=\"tag value 1\",tag_name_2=\"tag value 1\"} 10.0\nmy_counter{tag_name_1=\"tag value 2\",tag_name_2=\"tag value 2\"} 11.0\n\n# HELP my_histogram Example histogram\n# TYPE my_histogram histogram\nmy_histogram_bucket{tag=\"value\",le=\"1.0\"} 1\nmy_histogram_bucket{tag=\"value\",le=\"2.0\"} 2\nmy_histogram_bucket{tag=\"value\",le=\"3.0\"} 3\nmy_histogram_bucket{tag=\"value\",le=\"+Inf\"} 4\nmy_histogram_sum{tag=\"value\"} 10.0\nmy_histogram_count{tag=\"value\"} 4\n"
 
-data ExampleMetrics :: Symbol -> MetricType -> Type -> Type where
-  ExampleGauge
-    :: ExampleMetrics "100gauge" 'GaugeType ()
-  ExampleCounter
-    :: ExampleMetrics "my.counter" 'CounterType (M.HashMap T.Text T.Text)
-  ExampleHistogram
-    :: ExampleMetrics "my.histogram" 'HistogramType (M.HashMap T.Text T.Text)
+data ExampleMetrics :: Symbol -> Symbol -> MetricType -> Type -> Type where
+  ExampleGauge ::
+    ExampleMetrics
+      "100gauge"
+      "Example gauge"
+      'GaugeType
+      ()
+  ExampleCounter ::
+    ExampleMetrics
+      "my.counter"
+      "Example counter"
+      'CounterType
+      (M.HashMap T.Text T.Text)
+  ExampleHistogram ::
+    ExampleMetrics
+      "my.histogram"
+      "Example histogram"
+      'HistogramType
+      (M.HashMap T.Text T.Text)

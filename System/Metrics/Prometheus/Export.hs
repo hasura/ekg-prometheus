@@ -54,11 +54,12 @@ import Data.List (intersperse)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as M
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import System.Metrics.Prometheus
-  ( Identifier (Identifier, idName),
+  ( HelpTexts,
+    Identifier (Identifier, idName),
     Sample,
     Value (Counter, Gauge, Histogram),
   )
@@ -111,27 +112,30 @@ import System.Metrics.Prometheus.Histogram
 --
 -- is encoded as follows:
 --
+-- > # HELP _100gauge Example gauge
 -- > # TYPE _100gauge gauge
 -- > _100gauge 100.0
 -- >
+-- > # HELP my_counter Example counter
 -- > # TYPE my_counter counter
--- > my_counter{tag_name_1="tag value 1",tag_name_2="tag value 1"} 10.0
--- > my_counter{tag_name_1="tag value 2",tag_name_2="tag value 2"} 11.0
+-- > my_counter{tag_name_1=\"tag value 1\",tag_name_2=\"tag value 1\"} 10.0
+-- > my_counter{tag_name_1=\"tag value 2\",tag_name_2=\"tag value 2\"} 11.0
 -- >
+-- > # HELP my_histogram Example histogram
 -- > # TYPE my_histogram histogram
--- > my_histogram_bucket{tag="value",le="1.0"} 1
--- > my_histogram_bucket{tag="value",le="2.0"} 2
--- > my_histogram_bucket{tag="value",le="3.0"} 3
--- > my_histogram_bucket{tag="value",le="+Inf"} 4
--- > my_histogram_sum{tag="value"} 10.0
--- > my_histogram_count{tag="value"} 4
+-- > my_histogram_bucket{tag=\"value\",le=\"1.0\"} 1
+-- > my_histogram_bucket{tag=\"value\",le=\"2.0\"} 2
+-- > my_histogram_bucket{tag=\"value\",le=\"3.0\"} 3
+-- > my_histogram_bucket{tag=\"value\",le=\"+Inf\"} 4
+-- > my_histogram_sum{tag=\"value\"} 10.0
+-- > my_histogram_count{tag=\"value\"} 4
 --
-sampleToPrometheus :: Sample -> B.Builder
-sampleToPrometheus =
+sampleToPrometheus :: (Sample, HelpTexts) -> B.Builder
+sampleToPrometheus (sample, helpTexts) =
   mconcat
     . intersperse newline
     . map
-        ( exportGroupedMetric
+        ( exportGroupedMetric (M.mapKeys sanitizeName helpTexts)
         . makeGroupedMetric
         . NonEmpty.map (first sanitizeIdentifier)
         )
@@ -140,6 +144,7 @@ sampleToPrometheus =
     -- first.
     . NonEmpty.groupBy ((==) `on` (idName . fst))
     . M.toAscList
+    $ sample
 
 type Tags = HM.HashMap T.Text T.Text
 
@@ -197,66 +202,86 @@ getHistogramValue = \case
 
 ------------------------------------------------------------------------------
 
-exportGroupedMetric :: GroupedMetric -> B.Builder
-exportGroupedMetric = \case
+exportGroupedMetric ::
+  HelpTexts ->
+  GroupedMetric ->
+  B.Builder
+exportGroupedMetric helpTexts = \case
   GroupedCounter metricName tagsAndValues ->
-    exportCounter metricName tagsAndValues
+    let help = fromMaybe "" $ M.lookup metricName helpTexts
+     in exportCounter metricName help tagsAndValues
   GroupedGauge metricName tagsAndValues ->
-    exportGauge metricName tagsAndValues
+    let help = fromMaybe "" $ M.lookup metricName helpTexts
+     in exportGauge metricName help tagsAndValues
   GroupedHistogram metricName tagsAndValues ->
-    exportHistogram metricName tagsAndValues
+    let help = fromMaybe "" $ M.lookup metricName helpTexts
+     in exportHistogram metricName help tagsAndValues
 
 -- Prometheus counter samples
-exportCounter :: T.Text -> [(Tags, Double)] -> B.Builder
-exportCounter metricName tagsAndValues =
-  mappend (metricTypeLine "counter" metricName) $
-    foldMap
-      (\(tags, value) ->
-        metricSampleLine metricName tags (double value))
-      tagsAndValues
+exportCounter :: T.Text -> T.Text -> [(Tags, Double)] -> B.Builder
+exportCounter metricName help tagsAndValues =
+  mappend (metricHelpLine help metricName) $
+    mappend (metricTypeLine "counter" metricName) $
+      foldMap
+        (\(tags, value) ->
+          metricSampleLine metricName tags (double value))
+        tagsAndValues
 
 -- Prometheus gauge samples
-exportGauge :: T.Text -> [(Tags, Double)] -> B.Builder
-exportGauge metricName tagsAndValues =
-  mappend (metricTypeLine "gauge" metricName) $
-    foldMap
-      (\(tags, value) ->
-        metricSampleLine metricName tags (double value))
-      tagsAndValues
+exportGauge :: T.Text -> T.Text -> [(Tags, Double)] -> B.Builder
+exportGauge metricName help tagsAndValues =
+  mappend (metricHelpLine help metricName) $
+    mappend (metricTypeLine "gauge" metricName) $
+      foldMap
+        (\(tags, value) ->
+          metricSampleLine metricName tags (double value))
+        tagsAndValues
 
 -- Prometheus histogram samples
-exportHistogram :: T.Text -> [(Tags, HistogramSample)] -> B.Builder
-exportHistogram metricName tagsAndValues =
-  mappend (metricTypeLine "histogram" metricName) $
-    flip foldMap tagsAndValues $ \(tags, histSample) ->
-      mconcat
-        [ let cumulativeBuckets =
-                snd $ M.mapAccum cumulativeSum 0 (histBuckets histSample)
-                where
-                  cumulativeSum !sum_ x = let z = sum_ + x in (z, z)
-           in flip foldMap (M.toList cumulativeBuckets) $
-                \(upperBound, count) ->
-                  metricSampleLine
-                    metricName_bucket
-                    (HM.insert "le" (T.pack (show upperBound)) tags)
-                    (int count)
-        , metricSampleLine
-            metricName_bucket
-            (HM.insert "le" "+Inf" tags)
-            (int (histCount histSample))
-        , metricSampleLine
-            (metricName <> "_sum")
-            tags
-            (double (histSum histSample))
-        , metricSampleLine
-            (metricName <> "_count")
-            tags
-            (int (histCount histSample))
-        ]
-  where
-    metricName_bucket = metricName <> "_bucket"
+exportHistogram :: T.Text -> T.Text -> [(Tags, HistogramSample)] -> B.Builder
+exportHistogram metricName help tagsAndValues =
+  mappend (metricHelpLine help metricName) $
+    mappend (metricTypeLine "histogram" metricName) $
+      flip foldMap tagsAndValues $ \(tags, histSample) ->
+        mconcat
+          [ let cumulativeBuckets =
+                  snd $ M.mapAccum cumulativeSum 0 (histBuckets histSample)
+                  where
+                    cumulativeSum !sum_ x = let z = sum_ + x in (z, z)
+            in flip foldMap (M.toList cumulativeBuckets) $
+                  \(upperBound, count) ->
+                    metricSampleLine
+                      metricName_bucket
+                      (HM.insert "le" (T.pack (show upperBound)) tags)
+                      (int count)
+          , metricSampleLine
+              metricName_bucket
+              (HM.insert "le" "+Inf" tags)
+              (int (histCount histSample))
+          , metricSampleLine
+              (metricName <> "_sum")
+              tags
+              (double (histSum histSample))
+          , metricSampleLine
+              (metricName <> "_count")
+              tags
+              (int (histCount histSample))
+          ]
+    where
+      metricName_bucket = metricName <> "_bucket"
 
 ------------------------------------------------------------------------------
+
+-- Prometheus metric help line
+metricHelpLine :: T.Text -> T.Text -> B.Builder
+metricHelpLine helpText metricName
+  | T.null helpText = mempty
+  | otherwise =
+      "# HELP "
+        <> text metricName
+        <> B.charUtf8 ' '
+        <> text helpText
+        <> newline
 
 -- Prometheus metric type line
 metricTypeLine :: B.Builder -> T.Text -> B.Builder

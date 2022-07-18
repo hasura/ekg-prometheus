@@ -33,15 +33,15 @@ smokeTest = do
 
   let counterIdentifier = Identifier "ccounter" mempty
       gaugeIdentifier = Identifier "cgauge" mempty
-  !_ <- createCounter counterIdentifier store
-  !_ <- createGauge gaugeIdentifier store
+  !_ <- createCounter counterIdentifier "" store
+  !_ <- createGauge gaugeIdentifier "" store
 
   deregistrationHandle <- register store $ mconcat
-    [ registerCounter (Identifier "rcounter" mempty) (pure 0)
-    , registerGauge (Identifier "rgauge" mempty) (pure 0)
+    [ registerCounter (Identifier "rcounter" mempty) "" (pure 0)
+    , registerGauge (Identifier "rgauge" mempty) "" (pure 0)
     , flip registerGroup (pure ()) $ M.fromList
-        [ (Identifier "group" (HM.singleton "gcounter" mempty), const (Counter 0))
-        , (Identifier "group" (HM.singleton "ggauge" mempty), const (Gauge 0))
+        [ (Identifier "group" (HM.singleton "gcounter" mempty), (const (Counter 0), ""))
+        , (Identifier "group" (HM.singleton "ggauge" mempty), (const (Gauge 0), ""))
         ]
     ]
 

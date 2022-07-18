@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE StandaloneKindSignatures #-}
 
 module System.Metrics.Prometheus.GroupExample
   ( main
@@ -11,9 +12,10 @@ import GHC.Stats
 import GHC.TypeLits (Symbol)
 import System.Metrics.Prometheus
 
-data RTSMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
-  RTSGcs :: RTSMetrics "gcs" 'CounterType ()
-  RTSMaxLiveBytes :: RTSMetrics "max_live_bytes" 'GaugeType ()
+type RTSMetrics :: Symbol -> Symbol -> MetricType -> Type -> Type
+data RTSMetrics name help metricType tags where
+  RTSGcs :: RTSMetrics "gcs" "" 'CounterType ()
+  RTSMaxLiveBytes :: RTSMetrics "max_live_bytes" "" 'GaugeType ()
 
 main :: IO ()
 main = do
