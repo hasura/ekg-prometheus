@@ -43,8 +43,8 @@ module System.Metrics.Prometheus
     -- * Static metric annotations
   , MetricType (..)
 
-    -- ** Tags
-  , ToTags (..)
+    -- ** Labels
+  , ToLabels (..)
 
     -- * Changing scope
     -- $scopes
@@ -110,7 +110,7 @@ import qualified System.Metrics.Prometheus.Internal.Store as Internal
 --
 --  * a name,
 --
---  * a set of tags, and
+--  * a set of labels, and
 --
 --  * a way to get the metric's current value.
 --
@@ -162,8 +162,8 @@ import qualified System.Metrics.Prometheus.Internal.Store as Internal
 -- values @v@ represent the classes of metrics that may be registered to
 -- the store.
 --
--- The metrics of each class @v :: metrics name metricType tags@ have
--- their name, metric type, and possible tags statically determined by
+-- The metrics of each class @v :: metrics name metricType label@ have
+-- their name, metric type, and possible label statically determined by
 -- the respective type indices of @metrics@.
 newtype Store (metrics :: Symbol -> MetricType -> Type -> Type) =
   Store Internal.Store
@@ -203,16 +203,16 @@ type family MetricsImpl (t :: MetricType) where
   MetricsImpl 'HistogramType = Histogram.Histogram
 
 ------------------------------------------------------------------------
--- ** Tags
+-- ** Labels
 
 -- | A class of types that can be converted to sets of key-value pairs
--- ("tags"), which are used to annotate metrics with metadata.
+-- ("labels"), which are used to annotate metrics with metadata.
 --
 -- Each metric must be associated with a type from this typeclass. The
--- type determines the structure of the tag sets that may be attached to
--- the metric.
+-- type determines the structure of the label sets that may be attached
+-- to the metric.
 --
--- For convenience, one may derive, via "GHC.Generics", a `ToTags`
+-- For convenience, one may derive, via "GHC.Generics", a `ToLabels`
 -- instance for any record that exclusively has fields of type `T.Text`.
 --
 -- For example:
@@ -225,73 +225,74 @@ type family MetricsImpl (t :: MetricType) where
 -- >
 -- > import System.Metrics.Prometheus
 -- >
--- > data MyTags = MyTags
+-- > data MyLabels = MyLabels
 -- >   { key1 :: T.Text
 -- >   , key2 :: T.Text
 -- >   } deriving (Generic)
 -- >
--- > instance ToTags MyTags
+-- > instance ToLabels MyLabels
 --
--- >>> toTags $ MyTags { key1 = "value1", key2 = "value2" }
+-- >>> toLabels $ MyLabels { key1 = "value1", key2 = "value2" }
 -- fromList [("key1","value1"),("key2","value2")]
 --
-class ToTags a where
-  toTags :: a -> HM.HashMap T.Text T.Text
+class ToLabels a where
+  toLabels :: a -> HM.HashMap T.Text T.Text
 
-  default toTags ::
-    (Generic a, GToTags (Rep a)) => a -> HM.HashMap T.Text T.Text
-  toTags x = gToTags undefined (from x)
-  {-# INLINE toTags #-}
+  default toLabels ::
+    (Generic a, GToLabels (Rep a)) => a -> HM.HashMap T.Text T.Text
+  toLabels x = gToLabels undefined (from x)
+  {-# INLINE toLabels #-}
 
--- | Disallow tags altogether.
+-- | Disallow labels altogether.
 --
--- > toTags () = HashMap.empty
-instance ToTags () where
-  toTags () = HM.empty
-  {-# INLINE toTags #-}
+-- > toLabels () = HashMap.empty
+instance ToLabels () where
+  toLabels () = HM.empty
+  {-# INLINE toLabels #-}
 
--- | Place no constraints on tags.
+-- | Place no constraints on labels.
 --
--- > toTags @(HashMap Text Text) = id
-instance ToTags (HM.HashMap T.Text T.Text) where
-  toTags = id
-  {-# INLINE toTags #-}
+-- > toLabels @(HashMap Text Text) = id
+instance ToLabels (HM.HashMap T.Text T.Text) where
+  toLabels = id
+  {-# INLINE toLabels #-}
 
 ------------------------------------------------------------------------
--- ** Deriving `ToTags`
+-- ** Deriving `ToLabels`
 --
--- | Deriving instances of `ToTags` for records that exclusively have
+-- | Deriving instances of `ToLabels` for records that exclusively have
 -- fields of type `Text`.
-class GToTags (f :: Type -> Type) where
-  gToTags :: T.Text -> f x -> HM.HashMap T.Text T.Text
+class GToLabels (f :: Type -> Type) where
+  gToLabels :: T.Text -> f x -> HM.HashMap T.Text T.Text
 
 -- Data (passthrough)
-instance (GToTags f) => GToTags (D1 c f) where
-  gToTags name (M1 x) = gToTags name x
-  {-# INLINE gToTags #-}
+instance (GToLabels f) => GToLabels (D1 c f) where
+  gToLabels name (M1 x) = gToLabels name x
+  {-# INLINE gToLabels #-}
 
 -- Constructor (passthrough)
-instance (GToTags f) => GToTags (C1 c f) where
-  gToTags name (M1 x) = gToTags name x
-  {-# INLINE gToTags #-}
+instance (GToLabels f) => GToLabels (C1 c f) where
+  gToLabels name (M1 x) = gToLabels name x
+  {-# INLINE gToLabels #-}
 
 -- Products (union)
-instance (GToTags f, GToTags g) => GToTags (f :*: g) where
-  gToTags name (x :*: y) = gToTags name x `HM.union` gToTags name y
-  {-# INLINE gToTags #-}
+instance (GToLabels f, GToLabels g) => GToLabels (f :*: g) where
+  gToLabels name (x :*: y) =
+    gToLabels name x `HM.union` gToLabels name y
+  {-# INLINE gToLabels #-}
 
 -- Record selectors (take record selector name)
-instance (GToTags f, KnownSymbol name) =>
-  GToTags (S1 ('MetaSel ('Just name) su ss ds) f) where
-  gToTags _name (M1 x) =
+instance (GToLabels f, KnownSymbol name) =>
+  GToLabels (S1 ('MetaSel ('Just name) su ss ds) f) where
+  gToLabels _name (M1 x) =
     let name' = T.pack $ symbolVal $ Proxy @name
-    in  gToTags name' x
-  {-# INLINE gToTags #-}
+    in  gToLabels name' x
+  {-# INLINE gToLabels #-}
 
 -- Individual fields (take value, combine with name)
-instance GToTags (K1 i T.Text) where
-  gToTags name (K1 x) = HM.singleton name x
-  {-# INLINE gToTags #-}
+instance GToLabels (K1 i T.Text) where
+  gToLabels name (K1 x) = HM.singleton name x
+  {-# INLINE gToLabels #-}
 
 ------------------------------------------------------------------------
 -- * Changing scope
@@ -312,13 +313,15 @@ instance GToTags (K1 i T.Text) where
 --
 -- > data AppMetrics :: Symbol -> MetricType -> Type -> Type where
 -- >   GcSubset ::
--- >     GcMetrics name metricType tags -> AppMetrics name metricType tags
+-- >     GcMetrics name metricType labels ->
+-- >     AppMetrics name metricType labels
 -- >
 -- > subset' :: Store AppMetrics -> Store GcMetrics
 -- > subset' = subset GcSubset
 subset
-  :: (forall name metricType tags.
-      metricsSubset name metricType tags -> metrics name metricType tags)
+  :: (forall name metricType labels.
+      metricsSubset name metricType labels
+      -> metrics name metricType labels)
     -- ^ Subset
   -> Store metrics -- ^ Reference
   -> Store metricsSubset -- ^ Restricted reference
@@ -338,14 +341,14 @@ subset _ = coerce
 -- specification is a subset of that of the `metrics` specification. In
 -- general, the set of allowed operations of a metrics specification
 -- `metric` is determined by the set of triplets of types `(name,
--- metricType, tags)` for which there is a value `v :: metric name
--- metricType tags` in `metric`. Therefore, we only need to show that
+-- metricType, labels)` for which there is a value `v :: metric name
+-- metricType labels` in `metric`. Therefore, we only need to show that
 -- for every value `w0 :: metricSubset name metricType value` in
 -- `metricSubset`, there is a value `w1 :: metric name metricType value`
 -- in `metric` with the same type parameters as `w0`. But this is
 -- exactly what is done by a function of type `forall name metricType
--- tags. metricsSubset name metricType tags -> metrics name metricType
--- tags`.
+-- labels. metricsSubset name metricType labels -> metrics name
+-- metricType labels`.
 --
 -- Note: This function can be misused by providing an `undefined` value
 -- for the subset function. Doing so yields a function that can set the
@@ -363,7 +366,8 @@ data EmptyMetrics :: Symbol -> MetricType -> Type -> Type where
 
 -- | The smallest scope can be embedded in any scope.
 emptyOf
-  :: EmptyMetrics name metricType tags -> metrics name metricType tags
+  :: EmptyMetrics name metricType labels
+  -> metrics name metricType labels
 emptyOf metrics = case metrics of {}
 
 -- | The largest scope, containing all metrics. All scopes can be
@@ -376,14 +380,14 @@ emptyOf metrics = case metrics of {}
 -- > example = createCounter (Metrics @"total_requests") ()
 --
 data AllMetrics :: Symbol -> MetricType -> Type -> Type where
-  Metric :: AllMetrics name metricType tags
+  Metric :: AllMetrics name metricType labels
 
 _exampleAllMetrics :: Store AllMetrics -> IO Counter.Counter
 _exampleAllMetrics = createCounter (Metric @"total_requests") ()
 
 -- | All scopes can be embedded in the largest scope.
 ofAll
-  :: metrics name metricType tags -> AllMetrics name metricType tags
+  :: metrics name metricType labels -> AllMetrics name metricType labels
 ofAll _ = Metric
 
 ------------------------------------------------------------------------
@@ -397,9 +401,9 @@ ofAll _ = Metric
 -- ** Registering
 
 -- $registering
--- Metrics are identified by both their metric class and tag set. If you
--- try to register a metric at an identifier that is already in use by
--- an existing metric, the existing metric will be deregistered and
+-- Metrics are identified by both their metric class and label set. If
+-- you try to register a metric at an identifier that is already in use
+-- by an existing metric, the existing metric will be deregistered and
 -- replaced by the new metric.
 --
 -- Upon `register`ing a set of metrics, you will be given a handle that
@@ -431,9 +435,9 @@ deriving instance Monoid (Registration metrics)
 -- metric. The provided action to read the value must be thread-safe.
 -- Also see 'createCounter'.
 registerCounter
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'CounterType tags -- ^ Metric class
-  -> tags -- ^ Tags
+  :: forall metrics name labels. (KnownSymbol name, ToLabels labels)
+  => metrics name 'CounterType labels -- ^ Metric class
+  -> labels -- ^ Labels
   -> IO Double -- ^ Action to read the current metric value
   -> Registration metrics
 registerCounter = registerGeneric Internal.registerCounter
@@ -441,9 +445,9 @@ registerCounter = registerGeneric Internal.registerCounter
 -- | Register an integer-valued metric. The provided action to read
 -- the value must be thread-safe. Also see 'createGauge'.
 registerGauge
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'GaugeType tags -- ^ Metric class
-  -> tags -- ^ Tags
+  :: forall metrics name labels. (KnownSymbol name, ToLabels labels)
+  => metrics name 'GaugeType labels -- ^ Metric class
+  -> labels -- ^ Labels
   -> IO Double -- ^ Action to read the current metric value
   -> Registration metrics
 registerGauge = registerGeneric Internal.registerGauge
@@ -451,25 +455,26 @@ registerGauge = registerGeneric Internal.registerGauge
 -- | Register an integer-valued metric. The provided action to read
 -- the value must be thread-safe. Also see 'createGauge'.
 registerHistogram
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'HistogramType tags -- ^ Metric class
-  -> tags -- ^ Tags
+  :: forall metrics name labels. (KnownSymbol name, ToLabels labels)
+  => metrics name 'HistogramType labels -- ^ Metric class
+  -> labels -- ^ Labels
   -> IO HistogramSample -- ^ Action to read the current metric value
   -> Registration metrics
 registerHistogram = registerGeneric Internal.registerHistogram
 
 registerGeneric
-  :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
+  :: forall metrics name metricType labels.
+      (KnownSymbol name, ToLabels labels)
   => ( Internal.Identifier
       -> IO (MetricValue metricType)
       -> Internal.Registration)
-  -> metrics name metricType tags -- ^ Metric class
-  -> tags -- ^ Tags
+  -> metrics name metricType labels -- ^ Metric class
+  -> labels -- ^ Labels
   -> IO (MetricValue metricType) -- ^ Action to read the current metric value
   -> Registration metrics -- ^ Registration action
-registerGeneric f _ tags sample =
+registerGeneric f _ labels sample =
   let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Internal.Identifier name (toTags tags)
+      identifier = Internal.Identifier name (toLabels labels)
   in  Registration $ f identifier sample
 
 -- | Register an action that will be executed any time one of the
@@ -524,11 +529,11 @@ data SamplingGroup
   -- | Add a metric to a sampling group
   (:>)
     :: SamplingGroup metrics env xs -- ^ Group to add to
-    ->  ( metrics name metricType tags
-        , tags
+    ->  ( metrics name metricType labels
+        , labels
         , env -> MetricValue metricType )
-        -- ^ Metric class, Tags, Getter function
-    -> SamplingGroup metrics env (metrics name metricType tags ': xs)
+        -- ^ Metric class, Labels, Getter function
+    -> SamplingGroup metrics env (metrics name metricType labels ': xs)
 
 
 -- | Helper class for `registerGroup`.
@@ -549,13 +554,13 @@ instance
   ( RegisterGroup xs
   , ToMetricValue metricType
   , KnownSymbol name
-  , ToTags tags
-  ) => RegisterGroup (metrics name metricType tags ': xs)
+  , ToLabels labels
+  ) => RegisterGroup (metrics name metricType labels ': xs)
   where
-  registerGroup_ getters (group :> (_, tags, getter)) sample =
+  registerGroup_ getters (group :> (_, labels, getter)) sample =
     let identifier = Internal.Identifier
           { Internal.idName = T.pack $ symbolVal (Proxy @name)
-          , Internal.idTags = toTags tags }
+          , Internal.idLabels = toLabels labels }
         getter' =
           ( identifier
           , toMetricValue (Proxy @metricType) . getter )
@@ -572,18 +577,18 @@ instance
 
 -- | Create and register a zero-initialized counter.
 createCounter
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'CounterType tags -- ^ Metric class
-  -> tags -- ^ Tags
+  :: forall metrics name labels. (KnownSymbol name, ToLabels labels)
+  => metrics name 'CounterType labels -- ^ Metric class
+  -> labels -- ^ Labels
   -> Store metrics -- ^ Metric store
   -> IO Counter.Counter
 createCounter = createGeneric Internal.createCounter
 
 -- | Create and register a zero-initialized gauge.
 createGauge
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
-  => metrics name 'GaugeType tags -- ^ Metric class
-  -> tags -- ^ Tags
+  :: forall metrics name labels. (KnownSymbol name, ToLabels labels)
+  => metrics name 'GaugeType labels -- ^ Metric class
+  -> labels -- ^ Labels
   -> Store metrics -- ^ Metric store
   -> IO Gauge.Gauge
 createGauge = createGeneric Internal.createGauge
@@ -591,25 +596,26 @@ createGauge = createGeneric Internal.createGauge
 -- | Create and register an empty histogram. The buckets of the
 -- histogram are fixed and defined by the given upper bounds.
 createHistogram
-  :: forall metrics name tags. (KnownSymbol name, ToTags tags)
+  :: forall metrics name labels. (KnownSymbol name, ToLabels labels)
   => [Histogram.UpperBound] -- ^ Upper bounds of buckets
-  -> metrics name 'HistogramType tags -- ^ Metric class
-  -> tags -- ^ Tags
+  -> metrics name 'HistogramType labels -- ^ Metric class
+  -> labels -- ^ Labels
   -> Store metrics -- ^ Metric store
   -> IO Histogram.Histogram
 createHistogram upperBounds =
   createGeneric (Internal.createHistogram upperBounds)
 
 createGeneric
-  :: forall metrics name metricType tags. (KnownSymbol name, ToTags tags)
+  :: forall metrics name metricType labels.
+      (KnownSymbol name, ToLabels labels)
   => (Internal.Identifier -> Internal.Store -> IO (MetricsImpl metricType))
-  -> metrics name metricType tags -- ^ Metric class
-  -> tags -- ^ Tags
+  -> metrics name metricType labels -- ^ Metric class
+  -> labels -- ^ Labels
   -> Store metrics -- ^ Metric store
   -> IO (MetricsImpl metricType)
-createGeneric f _ tags (Store store) =
+createGeneric f _ labels (Store store) =
   let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Internal.Identifier name (toTags tags)
+      identifier = Internal.Identifier name (toLabels labels)
   in  f identifier store
 
 ------------------------------------------------------------------------

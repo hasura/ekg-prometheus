@@ -185,8 +185,8 @@ of metrics that share the same name.
 tags. A tag set can be represented by a value of any type, as long as
 the type is associated with a function that "renders" the value into a
 tag set. More specifically, a tag set can be represented by a value of
-any type that is an instance of the `ToTags` typeclass, which has a
-single function `toTags :: ToTags a => a -> HashMap Text Text`.
+any type that is an instance of the `ToLabels` typeclass, which has a
+single function `toLabels :: ToLabels a => a -> HashMap Text Text`.
 
 Here is an example metrics specification that defines some tagged metrics:
 
@@ -204,15 +204,15 @@ data AppMetrics2
 -- (2)
 newtype EndpointTags = EndpointTags { endpoint :: T.Text }
 
-instance ToTags EndpointTags where
-  toTags (EndpointTags endpoint') = HM.singleton "endpoint" endpoint'
+instance ToLabels EndpointTags where
+  toLabels (EndpointTags endpoint') = HM.singleton "endpoint" endpoint'
 
 -- 3
 data DataSourceTags = DataSourceTags
   { source_name :: T.Text
   , conn_info :: T.Text
   } deriving (Generic)
-instance ToTags DataSourceTags
+instance ToLabels DataSourceTags
 ```
 
 1. The third type parameter of the constructors is used to specify
@@ -222,13 +222,13 @@ instance ToTags DataSourceTags
    parameter are two user-defined types, `EndpointTags` and
    `DataSourceTags`.
 
-1. Here, the `ToTags` instance of `EndpointTags` has been specified by
+1. Here, the `ToLabels` instance of `EndpointTags` has been specified by
    hand.
 
-1. Here, the `ToTags` instance of `DataSourceTags` has been specified
+1. Here, the `ToLabels` instance of `DataSourceTags` has been specified
    using GHC.Generics.
 
-    A `ToTags` instance may be derived via GHC.Generics for any record
+    A `ToLabels` instance may be derived via GHC.Generics for any record
     that exclusively has fields of type `Text`. The record field names
     are used as the tag keys.
 
@@ -260,17 +260,17 @@ app2 = do
   let expectedSample = M.fromList
         [ ( Identifier
               { idName = "requests"
-              , idTags = HM.singleton "endpoint" "dev/harpsichord" }
+              , idLabels = HM.singleton "endpoint" "dev/harpsichord" }
           , Counter 0
           )
         , ( Identifier
               { idName = "requests"
-              , idTags = HM.singleton "endpoint" "dev/tabla" }
+              , idLabels = HM.singleton "endpoint" "dev/tabla" }
           , Counter 1
           )
         , ( Identifier
               { idName = "total_connections"
-              , idTags = HM.fromList
+              , idLabels = HM.fromList
                   [ ("source_name", "myDB")
                   , ("conn_info", "localhost:5432") ] }
           , Gauge 99

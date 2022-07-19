@@ -121,28 +121,28 @@ data GroupSampler = forall a. GroupSampler
 data Identifier = Identifier
     { idName :: T.Text
       -- ^ The name of the metric
-    , idTags :: HM.HashMap T.Text T.Text
+    , idLabels :: HM.HashMap T.Text T.Text
       -- ^ The key-value pairs associated with the metric
     }
     deriving (Generic, Show)
 
 -- | 'Identifier's are ordered lexicographically, where the name is more
--- significant than the tags.
+-- significant than the labels.
 --
 -- This ordering is used to efficiently group together metrics with the
 -- same name when serializing metrics. Such grouping is required, for
 -- example, by the Prometheus-2 exposition format.
 instance Ord Identifier where
-  compare (Identifier name1 tags1) (Identifier name2 tags2) =
+  compare (Identifier name1 labels1) (Identifier name2 labels2) =
     case compare name1 name2 of
       LT -> LT
       GT -> GT
-      EQ -> compare tags1 tags2
+      EQ -> compare labels1 labels2
   {-# INLINE compare #-}
 
 instance Eq Identifier where
-  Identifier name1 tags1 == Identifier name2 tags2 =
-    name1 == name2 && tags1 == tags2
+  Identifier name1 labels1 == Identifier name2 labels2 =
+    name1 == name2 && labels1 == labels2
   {-# INLINE (==) #-}
 
 

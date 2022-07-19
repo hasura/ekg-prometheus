@@ -26,14 +26,14 @@ data MyMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
 -- Custom tag set
 newtype EndpointTags = EndpointTags { endpoint :: T.Text }
   deriving (Generic)
-instance ToTags EndpointTags
+instance ToLabels EndpointTags
 
 -- Custom tag set
 data DataSourceTags = DataSourceTags
   { sourceName :: T.Text
   , connInfo :: T.Text
   } deriving (Generic)
-instance ToTags DataSourceTags
+instance ToLabels DataSourceTags
 
 main :: IO ()
 main = do
