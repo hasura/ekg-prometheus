@@ -31,7 +31,6 @@ tests = do
   deregisterSmokeTests
   registerGroupSmokeTests
   deregisterByHandleSmokeTests
-  deregisterByNameSmokeTests
 
 ------------------------------------------------------------------------
 -- * Generating state operations
@@ -54,9 +53,6 @@ identifier1 :: Identifier
 identifier1 = case identifiers of
   (x:_) -> x
   [] -> error "Test implementation error: Not enough identifiers"
-
-name1 :: T.Text
-name1 = idName identifier1
 
 identifierGroups :: [[Identifier]]
 identifierGroups =
@@ -298,22 +294,3 @@ prop_handleSpecificity ops =
       sampledState2 = unsafePerformIO $ sampleState state2
       sampledState3 = unsafePerformIO $ sampleState state3
   in  sampledState2 == sampledState3
-
-------------------------------------------------------------------------
--- * Deregister by name
-
-deregisterByNameSmokeTests :: Spec
-deregisterByNameSmokeTests =
-  describe "Deregistration by name" $ do
-    it "removes the intended metrics" $
-      QC.property prop_deregisterByNameDeregisters
-
-prop_deregisterByNameDeregisters :: [TestStateOp] -> Bool
-prop_deregisterByNameDeregisters ops =
-  let state0 = makeStateFromOps ops
-      state1 = deregisterByName name1 state0
-      sampledState1 = unsafePerformIO $ sampleState state1
-  in  notElem name1 $
-        map idName $
-          M.keys $
-            sampledStateMetrics sampledState1

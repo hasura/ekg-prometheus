@@ -50,12 +50,6 @@ module System.Metrics.Prometheus.Internal.Store
     , createGauge
     , createHistogram
 
-      -- * Deregistering metrics
-    , Deregistration
-    , deregister
-    , deregisterMetric
-    , deregisterByName
-
       -- * Sampling metrics
       -- $sampling
     , Sample
@@ -66,7 +60,6 @@ module System.Metrics.Prometheus.Internal.Store
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
-import qualified Data.Text as T
 import Prelude hiding (read)
 
 import System.Metrics.Prometheus.Counter (Counter)
@@ -76,7 +69,7 @@ import qualified System.Metrics.Prometheus.Gauge as Gauge
 import System.Metrics.Prometheus.Histogram (Histogram, HistogramSample)
 import qualified System.Metrics.Prometheus.Histogram as Histogram
 import System.Metrics.Prometheus.Internal.State
-  hiding (deregister, deregisterByName, register, registerGroup, sampleAll)
+  hiding (deregister, register, registerGroup, sampleAll)
 import qualified System.Metrics.Prometheus.Internal.State as Internal
 
 ------------------------------------------------------------------------
@@ -207,40 +200,6 @@ createHistogram upperBounds identifier store = do
     _ <- register store $
           registerHistogram identifier (Histogram.read histogram)
     return histogram
-
-------------------------------------------------------------------------
--- * Deregistering metrics
-
--- | An action that deregisters metrics from a metric store.
-newtype Deregistration = Deregistration (State -> State)
-
-instance Semigroup Deregistration where
-  Deregistration f <> Deregistration g = Deregistration (g . f)
-
-instance Monoid Deregistration where
-  mempty = Deregistration id
-
--- | Atomically apply a deregistration action to a metrics store.
-deregister
-  :: Store -- ^ Metric store
-  -> Deregistration -- ^ Deregistration action
-  -> IO ()
-deregister (Store stateRef) (Deregistration f) =
-    atomicModifyIORef' stateRef $ \state -> (f state, ())
-
--- | Deregister a metric (of any type).
-deregisterMetric
-  :: Identifier -- ^ Metric identifier
-  -> Deregistration
-deregisterMetric identifier =
-  Deregistration $ Internal.deregister identifier
-
--- | Deregister all metrics (of any type) with the given name, that is,
--- irrespective of their tags.
-deregisterByName
-  :: T.Text -- ^ Metric name
-  -> Deregistration
-deregisterByName name = Deregistration $ Internal.deregisterByName name
 
 ------------------------------------------------------------------------
 -- * Sampling metrics

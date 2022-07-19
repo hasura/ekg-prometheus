@@ -33,7 +33,6 @@ module System.Metrics.Prometheus.Internal.State
       -- $derived-operations
     , Handle
     , deregisterByHandle
-    , deregisterByName
 
       -- * Sampling metrics
     , Sample
@@ -355,17 +354,6 @@ deregisterByHandle (Handle identifier version) state =
                 deregister identifier state
             else
                 state
-
--- | Deregister all metrics (of any type) with the given name, ignoring
--- tags.
-deregisterByName
-    :: T.Text -- ^ Metric name
-    -> State
-    -> State
-deregisterByName name state =
-    let identifiers = -- Identifiers to be removed
-          filter (\i -> name == idName i) $ M.keys $ stateMetrics state
-    in  foldl' (flip deregister) state identifiers
 
 ------------------------------------------------------------------------
 -- * Sampling metrics

@@ -47,7 +47,4 @@ smokeTest = do
 
   !_ <- sampleAll store
 
-  deregister store $
-    deregisterMetric counterIdentifier <>
-    deregisterByName (idName gaugeIdentifier)
   deregistrationHandle

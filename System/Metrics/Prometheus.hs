@@ -76,13 +76,6 @@ module System.Metrics.Prometheus
   , createGauge
   , createHistogram
 
-    -- -- ** Deregistering
-    -- -- $deregistering
-  -- , Deregistration
-  -- , deregister
-  -- , deregisterMetric
-  -- , deregisterClass
-
     -- * Sampling metrics
     -- $sampling
   , sampleAll
@@ -618,52 +611,6 @@ createGeneric f _ tags (Store store) =
   let name = T.pack $ symbolVal (Proxy @name)
       identifier = Internal.Identifier name (toTags tags)
   in  f identifier store
-
-------------------------------------------------------------------------
--- ** Deregistering
-
--- $deregistering
--- Deregistration handles are the safest way to deregister metrics,
--- but you can also deregister metrics with this alternative interface.
-
--- | Atomically apply a deregistration action to a metrics store.
-_deregister
-  :: Store metrics -- ^ Metric store
-  -> Deregistration metrics -- ^ Deregistration action
-  -> IO ()
-_deregister (Store store) (Deregistration deregistration) =
-    Internal.deregister store deregistration
-
--- | An action that deregisters one or more metrics from a metric store.
--- Can only be run by `deregister`.
-newtype Deregistration (metrics :: Symbol -> MetricType -> Type -> Type)
-  = Deregistration Internal.Deregistration
-
--- | Combine deregistration actions by running one after the other.
-deriving instance Semigroup (Deregistration metrics)
-
-deriving instance Monoid (Deregistration metrics)
-
--- | Deregister a metric with a specific class and tag set.
-_deregisterMetric
-  :: forall metrics name metricType tags.
-      (KnownSymbol name, ToTags tags)
-  => metrics name metricType tags -- ^ Metric class
-  -> tags -- ^ Tags
-  -> Deregistration metrics
-_deregisterMetric _ tags =
-  let name = T.pack $ symbolVal (Proxy @name)
-      identifier = Internal.Identifier name (toTags tags)
-  in  Deregistration $ Internal.deregisterMetric identifier
-
--- | Deregister all the metrics registered to a class.
-_deregisterClass
-  :: forall metrics name metricType tags. (KnownSymbol name)
-  => metrics name metricType tags -- ^ Metric class
-  -> Deregistration metrics
-_deregisterClass _ =
-  let name = T.pack $ symbolVal (Proxy @name)
-  in  Deregistration $ Internal.deregisterByName name
 
 ------------------------------------------------------------------------
 -- * Sampling metrics
