@@ -43,11 +43,11 @@ tests = do
 names :: [T.Text]
 names = ["a", "b"]
 
-tagSets :: [HM.HashMap T.Text T.Text]
-tagSets = [HM.singleton "k" "v", HM.singleton "k" "w"]
+labelSets :: [HM.HashMap T.Text T.Text]
+labelSets = [HM.singleton "k" "v", HM.singleton "k" "w"]
 
 identifiers :: [Identifier]
-identifiers = Identifier <$> names <*> tagSets
+identifiers = Identifier <$> names <*> labelSets
 
 identifier1 :: Identifier
 identifier1 = case identifiers of

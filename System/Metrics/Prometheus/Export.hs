@@ -41,7 +41,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 module System.Metrics.Prometheus.Export
   ( sampleToPrometheus
-  , escapeTagValue
+  , escapeLabelValue
   ) where
 
 import Data.Bifunctor (first)
@@ -71,7 +71,7 @@ import System.Metrics.Prometheus.Histogram
 -- | Encode a metrics 'Sample' into the Prometheus 2 exposition format,
 -- adjusting the sample as follows:
 --
--- * The names of metrics and tags are adjusted to be valid Prometheus
+-- * The names of metrics and labels are adjusted to be valid Prometheus
 -- names (see
 -- <https://prometheus.io/docs/concepts/data_model/#metric-names-and-labels>):
 --
@@ -86,9 +86,9 @@ import System.Metrics.Prometheus.Histogram
 -- conditions:
 --
 --
--- * Within the values of tags, the backslash (@\\@), double-quote
+-- * Within the values of labels, the backslash (@\\@), double-quote
 -- (@\"@), and line feed (@\\n@) characters must be escaped as @\\\\@,
--- @\\\"@, and @\\n@, respectively. See 'escapeTagValue'.
+-- @\\\"@, and @\\n@, respectively. See 'escapeLabelValue'.
 --
 -- * If two metrics have the same name, they must also have the same
 -- metric type.
@@ -99,13 +99,13 @@ import System.Metrics.Prometheus.Histogram
 --
 -- For example, a metrics sample consisting of
 --
--- (1) a metric named @100gauge@, with no tags, of type @Gauge@, with
+-- (1) a metric named @100gauge@, with no labels, of type @Gauge@, with
 -- value @100@;
--- (2) a metric named @my.counter@, with tags @{tag.name.1="tag value 1", tag.name.2="tag value 1"}@, of type
+-- (2) a metric named @my.counter@, with labels @{label.name.1="label value 1", label.name.2="label value 1"}@, of type
 -- @Counter@, with value @10@;
--- (3) a metric named @my.counter@, with tags @{tag.name.1="tag value 2", tag.name.2="tag value 2"}@, of type
+-- (3) a metric named @my.counter@, with labels @{label.name.1="label value 2", label.name.2="label value 2"}@, of type
 -- @Counter@, with value @11@;
--- (4) a metric named @my.histogram@, with tags @{tag="value"}@, of type
+-- (4) a metric named @my.histogram@, with labels @{label_name="label_value"}@, of type
 -- @Histogram@, with bucket upper bounds of @[1, 2, 3]@, and
 -- observations @[1, 2, 3, 4]@;
 --
@@ -115,16 +115,16 @@ import System.Metrics.Prometheus.Histogram
 -- > _100gauge 100.0
 -- >
 -- > # TYPE my_counter counter
--- > my_counter{tag_name_1="tag value 1",tag_name_2="tag value 1"} 10.0
--- > my_counter{tag_name_1="tag value 2",tag_name_2="tag value 2"} 11.0
+-- > my_counter{label_name_2=\"label value 1\",label_name_1=\"label value 1\"} 10.0
+-- > my_counter{label_name_2=\"label value 2\",label_name_1=\"label value 2\"} 11.0
 -- >
 -- > # TYPE my_histogram histogram
--- > my_histogram_bucket{tag="value",le="1.0"} 1
--- > my_histogram_bucket{tag="value",le="2.0"} 2
--- > my_histogram_bucket{tag="value",le="3.0"} 3
--- > my_histogram_bucket{tag="value",le="+Inf"} 4
--- > my_histogram_sum{tag="value"} 10.0
--- > my_histogram_count{tag="value"} 4
+-- > my_histogram_bucket{le=\"1.0\",label_name=\"label_value\"} 1
+-- > my_histogram_bucket{le=\"2.0\",label_name=\"label_value\"} 2
+-- > my_histogram_bucket{le=\"3.0\",label_name=\"label_value\"} 3
+-- > my_histogram_bucket{le=\"+Inf\",label_name=\"label_value\"} 4
+-- > my_histogram_sum{label_name=\"label_value\"} 10.0
+-- > my_histogram_count{label_name=\"label_value\"} 4
 --
 sampleToPrometheus :: Sample -> B.Builder
 sampleToPrometheus =
@@ -141,20 +141,20 @@ sampleToPrometheus =
     . NonEmpty.groupBy ((==) `on` (idName . fst))
     . M.toAscList
 
-type Tags = HM.HashMap T.Text T.Text
+type Labels = HM.HashMap T.Text T.Text
 
 ------------------------------------------------------------------------------
 
 data GroupedMetric
   = GroupedCounter
       T.Text -- Metric name
-      [(Tags, Double)]
+      [(Labels, Double)]
   | GroupedGauge
       T.Text -- Metric name
-      [(Tags, Double)]
+      [(Labels, Double)]
   | GroupedHistogram
       T.Text -- Metric name
-      [(Tags, HistogramSample)]
+      [(Labels, HistogramSample)]
 
 -- Within a sample, metrics with the name should have the same metric
 -- type, but this is not guaranteed. To handle the case where two
@@ -167,16 +167,16 @@ makeGroupedMetric xs@((Identifier metricName _, headVal) :| _) =
   case headVal of
     Counter _ ->
       GroupedCounter metricName $
-        flip mapMaybe xs_list $ \(Identifier _ tags, val) ->
-          sequence (tags, getCounterValue val)
+        flip mapMaybe xs_list $ \(Identifier _ labels, val) ->
+          sequence (labels, getCounterValue val)
     Gauge _ ->
       GroupedGauge metricName $
-        flip mapMaybe xs_list $ \(Identifier _ tags, val) ->
-          sequence (tags, getGaugeValue val)
+        flip mapMaybe xs_list $ \(Identifier _ labels, val) ->
+          sequence (labels, getGaugeValue val)
     Histogram _ ->
       GroupedHistogram metricName $
-        flip mapMaybe xs_list $ \(Identifier _ tags, val) ->
-          sequence (tags, getHistogramValue val)
+        flip mapMaybe xs_list $ \(Identifier _ labels, val) ->
+          sequence (labels, getHistogramValue val)
   where
     xs_list = NonEmpty.toList xs
 
@@ -199,36 +199,36 @@ getHistogramValue = \case
 
 exportGroupedMetric :: GroupedMetric -> B.Builder
 exportGroupedMetric = \case
-  GroupedCounter metricName tagsAndValues ->
-    exportCounter metricName tagsAndValues
-  GroupedGauge metricName tagsAndValues ->
-    exportGauge metricName tagsAndValues
-  GroupedHistogram metricName tagsAndValues ->
-    exportHistogram metricName tagsAndValues
+  GroupedCounter metricName labelsAndValues ->
+    exportCounter metricName labelsAndValues
+  GroupedGauge metricName labelsAndValues ->
+    exportGauge metricName labelsAndValues
+  GroupedHistogram metricName labelsAndValues ->
+    exportHistogram metricName labelsAndValues
 
 -- Prometheus counter samples
-exportCounter :: T.Text -> [(Tags, Double)] -> B.Builder
-exportCounter metricName tagsAndValues =
+exportCounter :: T.Text -> [(Labels, Double)] -> B.Builder
+exportCounter metricName labelsAndValues =
   mappend (metricTypeLine "counter" metricName) $
     foldMap
-      (\(tags, value) ->
-        metricSampleLine metricName tags (double value))
-      tagsAndValues
+      (\(labels, value) ->
+        metricSampleLine metricName labels (double value))
+      labelsAndValues
 
 -- Prometheus gauge samples
-exportGauge :: T.Text -> [(Tags, Double)] -> B.Builder
-exportGauge metricName tagsAndValues =
+exportGauge :: T.Text -> [(Labels, Double)] -> B.Builder
+exportGauge metricName labelsAndValues =
   mappend (metricTypeLine "gauge" metricName) $
     foldMap
-      (\(tags, value) ->
-        metricSampleLine metricName tags (double value))
-      tagsAndValues
+      (\(labels, value) ->
+        metricSampleLine metricName labels (double value))
+      labelsAndValues
 
 -- Prometheus histogram samples
-exportHistogram :: T.Text -> [(Tags, HistogramSample)] -> B.Builder
-exportHistogram metricName tagsAndValues =
+exportHistogram :: T.Text -> [(Labels, HistogramSample)] -> B.Builder
+exportHistogram metricName labelsAndValues =
   mappend (metricTypeLine "histogram" metricName) $
-    flip foldMap tagsAndValues $ \(tags, histSample) ->
+    flip foldMap labelsAndValues $ \(labels, histSample) ->
       mconcat
         [ let cumulativeBuckets =
                 snd $ M.mapAccum cumulativeSum 0 (histBuckets histSample)
@@ -238,19 +238,19 @@ exportHistogram metricName tagsAndValues =
                 \(upperBound, count) ->
                   metricSampleLine
                     metricName_bucket
-                    (HM.insert "le" (T.pack (show upperBound)) tags)
+                    (HM.insert "le" (T.pack (show upperBound)) labels)
                     (int count)
         , metricSampleLine
             metricName_bucket
-            (HM.insert "le" "+Inf" tags)
+            (HM.insert "le" "+Inf" labels)
             (int (histCount histSample))
         , metricSampleLine
             (metricName <> "_sum")
-            tags
+            labels
             (double (histSum histSample))
         , metricSampleLine
             (metricName <> "_count")
-            tags
+            labels
             (int (histCount histSample))
         ]
   where
@@ -282,13 +282,13 @@ labelSet :: HM.HashMap T.Text T.Text -> B.Builder
 labelSet labels
   | HM.null labels = mempty
   | otherwise =
-      let tagList =
+      let labelList =
             mconcat $
               intersperse (B.charUtf8 ',') $
                 map labelPair $
                   HM.toList labels
        in B.charUtf8 '{'
-            <> tagList
+            <> labelList
             <> B.charUtf8 '}'
 
 -- Prometheus name-value label pair
@@ -303,13 +303,13 @@ labelPair (labelName, labelValue) =
 ------------------------------------------------------------------------------
 -- Input sanitization
 
--- | Adjust the metric and tag names contained in an EKG metric
+-- | Adjust the metric and label names contained in an EKG metric
 -- identifier so that they are valid Prometheus names.
 sanitizeIdentifier :: Identifier -> Identifier
-sanitizeIdentifier (Identifier metricName tags) =
+sanitizeIdentifier (Identifier metricName labels) =
   let name' = sanitizeName metricName
-      tags' = HM.mapKeys sanitizeName tags
-  in  Identifier name' tags'
+      labels' = HM.mapKeys sanitizeName labels
+  in  Identifier name' labels'
 
 -- | Adjust a string so that it is a valid Prometheus name:
 --
@@ -349,16 +349,16 @@ isInitialNameChar c =
 -- See
 -- <https://prometheus.io/docs/instrumenting/exposition_formats/#comments-help-text-and-type-information>.
 --
--- > >>> putStrLn $ escapeTagValue "\n \" \\"
+-- > >>> putStrLn $ escapeLabelValue "\n \" \\"
 -- > \n \" \\
 
 -- Implementation note: We do not apply this function on behalf of the
 -- user because it is not idempotent.
-escapeTagValue :: T.Text -> T.Text
-escapeTagValue = T.concatMap escapeTagValueChar
+escapeLabelValue :: T.Text -> T.Text
+escapeLabelValue = T.concatMap escapeLabelValueChar
 
-escapeTagValueChar :: Char -> T.Text
-escapeTagValueChar c
+escapeLabelValueChar :: Char -> T.Text
+escapeLabelValueChar c
   | c == '\n' = "\\n"
   | c == '"' = "\\\""
   | c == '\\' = "\\\\"

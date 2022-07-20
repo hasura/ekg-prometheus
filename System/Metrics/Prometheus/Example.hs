@@ -17,37 +17,37 @@ import qualified System.Metrics.Prometheus.Gauge as Gauge
 import System.Metrics.Prometheus
 
 -- Custom type describing a set of classes of metrics.
-data MyMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
+data MyMetrics (name :: Symbol) (t :: MetricType) (labels :: Type) where
   Requests ::
-    MyMetrics "requests" 'CounterType EndpointTags
+    MyMetrics "requests" 'CounterType EndpointLabels
   DBConnections ::
-    MyMetrics "postgres.total_connections" 'GaugeType DataSourceTags
+    MyMetrics "postgres.total_connections" 'GaugeType DataSourceLabels
 
--- Custom tag set
-newtype EndpointTags = EndpointTags { endpoint :: T.Text }
+-- Custom label set
+newtype EndpointLabels = EndpointLabels { endpoint :: T.Text }
   deriving (Generic)
-instance ToLabels EndpointTags
+instance ToLabels EndpointLabels
 
--- Custom tag set
-data DataSourceTags = DataSourceTags
+-- Custom label set
+data DataSourceLabels = DataSourceLabels
   { sourceName :: T.Text
   , connInfo :: T.Text
   } deriving (Generic)
-instance ToLabels DataSourceTags
+instance ToLabels DataSourceLabels
 
 main :: IO ()
 main = do
   store <- newStore
   harpsichordReqs <-
-    createCounter Requests (EndpointTags "dev/harpsichord") store
+    createCounter Requests (EndpointLabels "dev/harpsichord") store
   tablaReqs <-
-    createCounter Requests (EndpointTags "dev/tabla") store
+    createCounter Requests (EndpointLabels "dev/tabla") store
   dbConnections <-
-    let tags = DataSourceTags
+    let labels = DataSourceLabels
           { sourceName = "myDB"
           , connInfo = "localhost:5432"
           }
-    in  createGauge DBConnections tags store
+    in  createGauge DBConnections labels store
 
   Counter.add harpsichordReqs 5
   Counter.add tablaReqs 10

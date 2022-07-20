@@ -11,7 +11,7 @@ import GHC.Stats
 import GHC.TypeLits (Symbol)
 import System.Metrics.Prometheus
 
-data RTSMetrics (name :: Symbol) (t :: MetricType) (tags :: Type) where
+data RTSMetrics (name :: Symbol) (t :: MetricType) (labels :: Type) where
   RTSGcs :: RTSMetrics "gcs" 'CounterType ()
   RTSMaxLiveBytes :: RTSMetrics "max_live_bytes" 'GaugeType ()
 

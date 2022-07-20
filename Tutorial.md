@@ -1,11 +1,12 @@
 # Tutorial
 
-This document introduces Hasura's fork of the `ekg-core` metrics
-library, and illustrates how to use the library to instrument your
-programs with metrics. If you are new to the library, read this document
-first. If you have used the original `ekg-core` library, you should
-still read this document first. For a more complete API reference, see
-the Haddocks of the `System.Metrics.Prometheus` module.
+This document introduces the `ekg-prometheus` Prometheus client library,
+and illustrates how to use the library to instrument your programs with
+Prometheus metrics. If you are new to the library, read this document
+first. If you have used the `ekg-core` library, on which
+`ekg-prometheus` is based on, you should still read this document first.
+For a more complete API reference, see the Haddocks of the
+`System.Metrics.Prometheus` module.
 
 This document is a literate Haskell program:
 
@@ -35,14 +36,14 @@ import qualified System.Metrics.Prometheus.Gauge as Gauge
 ```
 
 Although you will need to use some type-level features of Haskell when
-using the `ekg-core` API, you will not need a solid understanding of
-type-level programming. You can use `ekg-core` proficiently just by
-copying the examples presented in this tutorial.
+using the `ekg-prometheus` API, you will not need a solid understanding
+of type-level programming. You can use `ekg-prometheus` proficiently
+just by copying the examples presented in this tutorial.
 
 For those who have used the original `ekg-core` library, Hasura's fork
 adds the following features:
 
-* dimensional/tagged metrics (in the style of Prometheus), and
+* dimensional/tagged metrics (Prometheus labels), and
 * dynamic metrics (the ability to deregister and reregister metrics).
 
 ## Overview
@@ -51,7 +52,7 @@ Metrics are used to monitor program behavior and performance. All
 metrics have:
 
 - a name,
-- a set of tags (possibly empty), and
+- a set of labels (possibly empty), and
 - a way to get the metric's current value.
 
 `ekg-core` provides a way to register metrics in a global "metric
@@ -63,7 +64,7 @@ This tutorial will show you how to:
 
 - specify metrics,
 - register and sample metrics,
-- add tags to metrics,
+- add labels to metrics,
 - deregister metrics,
 - use pre-defined metrics, and
 - sample a subset of metrics atomically.
@@ -82,7 +83,7 @@ that specifies two metrics:
 data AppMetrics1
   :: Symbol -- ^ Metric name
   -> MetricType -- ^ e.g. Counter, Gauge
-  -> Type -- ^ Tag set structure
+  -> Type -- ^ Label set structure
   -> Type
   where
   Requests :: AppMetrics1 "my_app.requests" 'CounterType ()
@@ -91,15 +92,15 @@ data AppMetrics1
 
 The `AppMetrics1` GADT has two constructors, `Requests` and
 `Connections`, each of which correspond to a metric. The type parameters
-of each constructor determine the name, type, and "tag structure" of
+of each constructor determine the name, type, and "label structure" of
 their corresponding metric. For example, the `Requests` constructor
 specifies a metric with:
 
 * name "my_app.requests", and
 * type counter, and
-* tags disabled.
+* labels disabled.
 
-Tutorial note: We have glossed over tags for now, but will introduce
+Tutorial note: We have glossed over labels for now, but will introduce
 them properly later.
 
 ## Registering and sampling metrics
@@ -153,7 +154,7 @@ app1 = do
    The `registerCounter` function takes as its first argument a
    constructor of a metrics specification GADT. This constructor must
    have metric type `'CounterType`. Its second parameter specifies the
-   set of "tags" to attach to the metric -- for now, tags have been
+   set of "labels" to attach to the metric -- for now, labels have been
    disallowed. Its third parameter specifies the IO action that the
    store should use to sample the current value of the metric.
 
@@ -168,69 +169,73 @@ app1 = do
    (For more information, see
    [sampling metrics atomically](#Sampling-groups-of-metrics-atomically))
 
-## Adding tags to metrics
+## Adding labels to metrics
 
 `ekg-core` has a multi-dimensional data model, like
 [Prometheus](https://prometheus.io). In this data model, metrics may be
-annotated by a **tag set**,
-which is a set of key-value pairs called **tags**.
-Tags are useful for convenient filtering and aggregation of metric data.
-In `ekg-core`, metrics are identified by both their name _and_ their tag
-set, so metrics with the same name but different tag sets are distinct
-and independent metrics. When working with tagged metrics, the
-constructors of a metrics specification GADT corrrespond to **classes**
-of metrics that share the same name.
+annotated by a **labels set**,
+which is a set of key-value pairs called **labels**.
+Labels are useful for convenient filtering and aggregation of metric
+data. In `ekg-core`, metrics are identified by both their name _and_
+their label set, so metrics with the same name but different label sets
+are distinct and independent metrics. When working with labelled
+metrics, the constructors of a metrics specification GADT corrrespond to
+**classes** of metrics that share the same name.
 
 `ekg-core` also has support for _structuring_ the representation of your
-tags. A tag set can be represented by a value of any type, as long as
-the type is associated with a function that "renders" the value into a
-tag set. More specifically, a tag set can be represented by a value of
-any type that is an instance of the `ToLabels` typeclass, which has a
-single function `toLabels :: ToLabels a => a -> HashMap Text Text`.
+labels. A label set can be represented by a value of any type, as long
+as the type is associated with a function that "renders" the value into
+a label set. More specifically, a label set can be represented by a
+value of any type that is an instance of the `ToLabels` typeclass, which
+has a single function `toLabels :: ToLabels a => a -> HashMap Text
+Text`.
 
-Here is an example metrics specification that defines some tagged metrics:
+Here is an example metrics specification that defines some labelled
+metrics:
 
 ```haskell
 data AppMetrics2
   :: Symbol
   -> MetricType
-  -> Type -- ^ Tag set structure
+  -> Type -- ^ Label set structure
   -> Type
   where
   -- (1)
-  HTTPRequests :: AppMetrics2 "requests" 'CounterType EndpointTags
-  DBConnections :: AppMetrics2 "total_connections" 'GaugeType DataSourceTags
+  HTTPRequests ::
+    AppMetrics2 "requests" 'CounterType EndpointLabels
+  DBConnections ::
+    AppMetrics2 "total_connections" 'GaugeType DataSourceLabels
 
 -- (2)
-newtype EndpointTags = EndpointTags { endpoint :: T.Text }
+newtype EndpointLabels = EndpointLabels { endpoint :: T.Text }
 
-instance ToLabels EndpointTags where
-  toLabels (EndpointTags endpoint') = HM.singleton "endpoint" endpoint'
+instance ToLabels EndpointLabels where
+  toLabels (EndpointLabels endpoint') = HM.singleton "endpoint" endpoint'
 
 -- 3
-data DataSourceTags = DataSourceTags
+data DataSourceLabels = DataSourceLabels
   { source_name :: T.Text
   , conn_info :: T.Text
   } deriving (Generic)
-instance ToLabels DataSourceTags
+instance ToLabels DataSourceLabels
 ```
 
 1. The third type parameter of the constructors is used to specify
-   tag set structure.
+   label set structure.
 
-   In this example, the types provided for the tag set structure
-   parameter are two user-defined types, `EndpointTags` and
-   `DataSourceTags`.
+   In this example, the types provided for the label set structure
+   parameter are two user-defined types, `EndpointLabels` and
+   `DataSourceLabels`.
 
-1. Here, the `ToLabels` instance of `EndpointTags` has been specified by
+1. Here, the `ToLabels` instance of `EndpointLabels` has been specified by
    hand.
 
-1. Here, the `ToLabels` instance of `DataSourceTags` has been specified
+1. Here, the `ToLabels` instance of `DataSourceLabels` has been specified
    using GHC.Generics.
 
     A `ToLabels` instance may be derived via GHC.Generics for any record
     that exclusively has fields of type `Text`. The record field names
-    are used as the tag keys.
+    are used as the label keys.
 
 Here is an example program using this metrics specification:
 
@@ -244,12 +249,12 @@ app2 = do
   dbConnections <- Gauge.new
 
   _ <- register store $ mconcat
-    [ registerCounter HTTPRequests (EndpointTags "dev/harpsichord") (Counter.read harpsichordRequests)
-    , registerCounter HTTPRequests (EndpointTags "dev/tabla") (Counter.read tablaRequests)
-    , let tags = DataSourceTags
+    [ registerCounter HTTPRequests (EndpointLabels "dev/harpsichord") (Counter.read harpsichordRequests)
+    , registerCounter HTTPRequests (EndpointLabels "dev/tabla") (Counter.read tablaRequests)
+    , let labels = DataSourceLabels
             { source_name = "myDB"
             , conn_info = "localhost:5432" }
-      in  registerGauge DBConnections tags (Gauge.read dbConnections)
+      in  registerGauge DBConnections labels (Gauge.read dbConnections)
     ]
 
   Counter.inc tablaRequests
@@ -285,9 +290,9 @@ Metrics you register to a metric store need not be permanent; metrics
 can be replaced (reregistered) or removed (deregistered).
 
 Reregistering metrics in `ekg-core` is implicit. If you try to register
-a metric at a (name, tag set) pair that is already in use by an existing
-metric, the existing metric will be deregistered and replaced with the
-new metric.
+a metric at a (name, label set) pair that is already in use by an
+existing metric, the existing metric will be deregistered and replaced
+with the new metric.
 
 Deregistering metrics in `ekg-core` is explicit, and is done using
 **deregistration handles**. When you register a set of metrics with
@@ -371,7 +376,8 @@ specification:
 data AppMetrics4 :: Symbol -> MetricType -> Type -> Type where
   -- (1)
   GcSubset ::
-    GcMetrics name metricType tags -> AppMetrics4 name metricType tags
+    GcMetrics name metricType labels ->
+    AppMetrics4 name metricType labels
 
 app4 :: IO ()
 app4 = do
@@ -385,7 +391,7 @@ app4 = do
    `GcMetrics` and makes it a metric class of `AppMetrics4`.
 
     Metric classes with the same type parameters (name, metric type, and
-    tag structure) are treated in the same way by all functions of
+    label structure) are treated in the same way by all functions of
     `ekg-core`, so it is enough for our constructor to "forward" the
     type parameters.
 
@@ -452,7 +458,7 @@ app5 = do
 
     Each metric is represented by:
     - a metric class,
-    - a tag set, and
+    - a label set, and
     - a pure function that computes the metric's value from a single
       value that is shared with all metrics of the sampling group.
 
@@ -466,7 +472,7 @@ This tutorial introduced and demonstrated the core features of the
 
 - specifying metrics,
 - registering and sampling metrics,
-- tagging metrics,
+- labelling metrics,
 - deregistering metrics,
 - using pre-defined metrics, and
 - sampling a subset of metrics atomically.
@@ -491,9 +497,11 @@ removed or modified. Here is an example program that does this.
 -- (1)
 data AppMetrics6 :: Symbol -> MetricType -> Type -> Type where
   DynamicSubset ::
-    DynamicMetrics name metricType tags -> AppMetrics6 name metricType tags
+    DynamicMetrics name metricType labels ->
+    AppMetrics6 name metricType labels
   StaticSubset ::
-    StaticMetrics name metricType tags -> AppMetrics6 name metricType tags
+    StaticMetrics name metricType labels ->
+    AppMetrics6 name metricType labels
 
 data StaticMetrics :: Symbol -> MetricType -> Type -> Type where
   MyStaticMetric :: StaticMetrics "my_static_metric" 'CounterType ()
