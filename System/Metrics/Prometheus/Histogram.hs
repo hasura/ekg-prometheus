@@ -39,6 +39,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 {-# LANGUAGE TupleSections #-}
 
+-- | This module defines a type for mutable histograms with fixed, user-defined
+-- buckets. All operations on histograms are thread-safe.
 module System.Metrics.Prometheus.Histogram
     ( Histogram
     , HistogramSample (..)

@@ -39,6 +39,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | This module defines an exporter for rendering metric 'Sample's into the
+-- Prometheus format. To help ensure that the output of the exporter conforms
+-- to the Prometheus format, the exporter peforms some sanitization of its
+-- input.
+--
 module System.Metrics.Prometheus.Export
   ( sampleToPrometheus
   , escapeLabelValue
