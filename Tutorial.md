@@ -4,7 +4,7 @@ This document introduces the `ekg-prometheus` Prometheus client library,
 and illustrates how to use the library to instrument your programs with
 Prometheus metrics. If you are new to the library, read this document
 first. If you have used the `ekg-core` library, on which
-`ekg-prometheus` is based on, you should still read this document first.
+`ekg-prometheus` is based, you should still read this document first.
 For a more complete API reference, see the Haddocks of the
 `System.Metrics.Prometheus` module.
 
@@ -55,7 +55,7 @@ metrics have:
 - a set of labels (possibly empty), and
 - a way to get the metric's current value.
 
-`ekg-core` provides a way to register metrics in a global "metric
+`ekg-prometheus` provides a way to register metrics in a global "metric
 store". The store can then be used to get a snapshot of all metrics. The
 store also serves as a central place to keep track of all the program's
 metrics, both user and library defined.
@@ -72,8 +72,9 @@ This tutorial will show you how to:
 ## Specifying metrics
 
 Before you can register metrics to a metric store, you must first
-specify _which_ metrics may be registered to that store. `ekg-core` will
-statically ensure that your specifications are respected.
+specify _which_ metrics may be registered to that store.
+`ekg-prometheus` will statically ensure that your specifications are
+respected.
 
 Your **metrics specification** must be given as a generalized algebraic
 data type (GADT) with a specific kind signature. Here is an example GADT
@@ -171,24 +172,24 @@ app1 = do
 
 ## Adding labels to metrics
 
-`ekg-core` has a multi-dimensional data model, like
+`ekg-prometheus` has a multi-dimensional data model, like
 [Prometheus](https://prometheus.io). In this data model, metrics may be
 annotated by a **labels set**,
 which is a set of key-value pairs called **labels**.
 Labels are useful for convenient filtering and aggregation of metric
-data. In `ekg-core`, metrics are identified by both their name _and_
-their label set, so metrics with the same name but different label sets
-are distinct and independent metrics. When working with labelled
+data. In `ekg-prometheus`, metrics are identified by both their name
+_and_ their label set, so metrics with the same name but different label
+sets are distinct and independent metrics. When working with labelled
 metrics, the constructors of a metrics specification GADT corrrespond to
 **classes** of metrics that share the same name.
 
-`ekg-core` also has support for _structuring_ the representation of your
-labels. A label set can be represented by a value of any type, as long
-as the type is associated with a function that "renders" the value into
-a label set. More specifically, a label set can be represented by a
-value of any type that is an instance of the `ToLabels` typeclass, which
-has a single function `toLabels :: ToLabels a => a -> HashMap Text
-Text`.
+`ekg-prometheus` also has support for _structuring_ the representation
+of your labels. A label set can be represented by a value of any type,
+as long as the type is associated with a function that "renders" the
+value into a label set. More specifically, a label set can be
+represented by a value of any type that is an instance of the `ToLabels`
+typeclass, which has a single function `toLabels :: ToLabels a => a ->
+HashMap Text Text`.
 
 Here is an example metrics specification that defines some labelled
 metrics:
@@ -289,12 +290,12 @@ app2 = do
 Metrics you register to a metric store need not be permanent; metrics
 can be replaced (reregistered) or removed (deregistered).
 
-Reregistering metrics in `ekg-core` is implicit. If you try to register
-a metric at a (name, label set) pair that is already in use by an
-existing metric, the existing metric will be deregistered and replaced
-with the new metric.
+Reregistering metrics in `ekg-prometheus` is implicit. If you try to
+register a metric at a (name, label set) pair that is already in use by
+an existing metric, the existing metric will be deregistered and
+replaced with the new metric.
 
-Deregistering metrics in `ekg-core` is explicit, and is done using
+Deregistering metrics in `ekg-prometheus` is explicit, and is done using
 **deregistration handles**. When you register a set of metrics with
 `register`, `register` will return an IO action (the deregistration
 handle) that can be used to _specifically_ deregister the newly
@@ -362,8 +363,8 @@ app3 = do
 ## Using pre-defined sets of metrics
 
 Other libraries can define sets of metrics that you can register to your
-metric store. For example, the `ekg-core` library defines metrics for
-the runtime system metrics exposed by `GHC.Stats` -- see
+metric store. For example, the `ekg-prometheus` library defines metrics
+for the runtime system metrics exposed by `GHC.Stats` -- see
 `registerGcMetrics`. Libraries that define metrics must also define
 their own metrics specifications, which you will need to include in your
 own metrics specification in order to use their metrics.
@@ -392,8 +393,8 @@ app4 = do
 
     Metric classes with the same type parameters (name, metric type, and
     label structure) are treated in the same way by all functions of
-    `ekg-core`, so it is enough for our constructor to "forward" the
-    type parameters.
+    `ekg-prometheus`, so it is enough for our constructor to "forward"
+    the type parameters.
 
 1. In order use `registerGcMetrics` with our metric store, we must use
    the `subset` function to create a new reference to our metric store
@@ -402,7 +403,7 @@ app4 = do
 
 ## Sampling groups of metrics atomically
 
-`ekg-core` provides a way to obtain atomic snapshots of a group of
+`ekg-prometheus` provides a way to obtain atomic snapshots of a group of
 metrics. This can be useful if
 
 - you need a consistent view of several metrics, or
@@ -415,8 +416,8 @@ run-time system provides a function to sample all GC statistics at once.
 
 The usual metric samples obtained through the `sampleAll` function are
 generally _not_ atomic snapshots of their metrics. In general, because
-metric sampling actions can be arbitrary `IO` actions, `ekg-core` has no
-way to ensure that independent metrics are sampled atomically.
+metric sampling actions can be arbitrary `IO` actions, `ekg-prometheus`
+has no way to ensure that independent metrics are sampled atomically.
 
 However, a group of metrics can be sampled atomically if
 
@@ -452,7 +453,7 @@ app5 = do
 ```
 
 1. We replicate part of the `GcMetrics` metrics specification from
-   `ekg-core`.
+   `ekg-prometheus`.
 
 1. We create a sampling group of two of the runtime system metrics.
 
@@ -468,7 +469,7 @@ app5 = do
 ## Conclusion
 
 This tutorial introduced and demonstrated the core features of the
-`ekg-core` library:
+`ekg-prometheus` library:
 
 - specifying metrics,
 - registering and sampling metrics,
@@ -485,7 +486,7 @@ Additional features and details can be found in the following documents:
 ## Appendix
 
 This section contains extra material that is not needed to use the
-`ekg-core` library, but may be useful. This section assumes an
+`ekg-prometheus` library, but may be useful. This section assumes an
 understanding of the material covered in the tutorial.
 
 ### Simulating static metrics
